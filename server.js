@@ -4,6 +4,10 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
+
+// ✅ SOLUCIÓN 1: CONFIGURAR TRUST PROXY PARA RENDER
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -21,71 +25,58 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// Configuración robusta
-const CONFIG = {
-  timeouts: {
-    navigation: 60000,
-    selector: 15000,
-    calculation: 20000
-  },
-  delays: {
-    afterNavigation: 5000,
-    afterClick: 2000,
-    beforeCalculation: 1000,
-    betweenRetries: 3000
-  },
-  maxRetries: 3
-};
-
-// Función de delay segura
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Función para cleanup seguro del browser
-async function safeCloseBrowser(browser) {
-  if (!browser) return;
+// ✅ SOLUCIÓN 2: CONFIGURACIÓN PUPPETEER PARA RENDER
+const getBrowserConfig = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
   
-  try {
-    const pages = await browser.pages();
-    for (const page of pages) {
-      try {
-        await page.close();
-      } catch (e) {
-        // Ignorar errores al cerrar páginas
-      }
-    }
-    await browser.close();
-  } catch (e) {
-    try {
-      // Forzar cierre si el método normal falla
-      await browser.process()?.kill('SIGKILL');
-    } catch (killError) {
-      // Último recurso: matar procesos del sistema
-      const { exec } = require('child_process');
-      exec('taskkill /f /im chrome.exe', () => {});
-      exec('pkill -f chrome', () => {});
-    }
-  }
-}
-
-// Función para detectar si la página está disponible
-async function isPageResponsive(page) {
-  try {
-    await page.evaluate(() => document.title);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-// Función principal de conversión
-async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
-  let browser = null;
-  let page = null;
-  
-  try {
-    // Configuración ultra-robusta del browser
-    browser = await puppeteer.launch({
-      headless: "new", // Usar nuevo modo headless para APIs
+  if (isProduction) {
+    // Configuración específica para Render
+    return {
+      headless: "new",
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-dev-tools',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-web-security',
+        '--disable-features=TranslateUI,VizDisplayCompositor',
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-background-mode',
+        '--force-device-scale-factor=1',
+        '--window-size=1200,800',
+        '--memory-pressure-off',
+        '--max_old_space_size=4096',
+        '--disable-ipc-flooding-protection',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--no-default-browser-check',
+        '--safebrowsing-disable-auto-update',
+        '--enable-automation',
+        '--password-store=basic',
+        '--use-mock-keychain'
+      ],
+      defaultViewport: { width: 1200, height: 800 },
+      ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
+      timeout: 60000
+    };
+  } else {
+    // Configuración para desarrollo local
+    return {
+      headless: "new",
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -109,29 +100,162 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
       ],
       defaultViewport: { width: 1200, height: 800 },
       ignoreDefaultArgs: ['--enable-automation'],
+    };
+  }
+};
+
+// Configuración robusta
+const CONFIG = {
+  timeouts: {
+    navigation: 90000, // Aumentado para Render
+    selector: 20000,   // Aumentado para Render
+    calculation: 30000 // Aumentado para Render
+  },
+  delays: {
+    afterNavigation: 6000, // Aumentado para Render
+    afterClick: 3000,
+    beforeCalculation: 2000,
+    betweenRetries: 5000   // Aumentado para Render
+  },
+  maxRetries: 3
+};
+
+// Función de delay segura
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Función para cleanup seguro del browser
+async function safeCloseBrowser(browser) {
+  if (!browser) return;
+  
+  try {
+    console.log('🧹 Iniciando cleanup del browser...');
+    
+    // Cerrar todas las páginas primero
+    const pages = await browser.pages();
+    for (const page of pages) {
+      try {
+        await page.close();
+      } catch (e) {
+        console.log('Error cerrando página:', e.message);
+      }
+    }
+    
+    // Cerrar el browser
+    await browser.close();
+    console.log('✅ Browser cerrado correctamente');
+    
+  } catch (e) {
+    console.log('❌ Error en cierre normal, intentando forzar cierre...');
+    try {
+      // Forzar cierre si el método normal falla
+      if (browser.process()) {
+        browser.process().kill('SIGKILL');
+        console.log('✅ Browser forzado a cerrar con SIGKILL');
+      }
+    } catch (killError) {
+      console.log('❌ Error en cierre forzado:', killError.message);
+      
+      // Último recurso para sistemas Unix/Linux (como Render)
+      if (process.platform !== 'win32') {
+        try {
+          const { exec } = require('child_process');
+          exec('pkill -f "chrome\\|chromium"', (error, stdout, stderr) => {
+            if (error) {
+              console.log('Error ejecutando pkill:', error.message);
+            } else {
+              console.log('✅ Procesos Chrome/Chromium terminados con pkill');
+            }
+          });
+        } catch (execError) {
+          console.log('Error ejecutando comando del sistema:', execError.message);
+        }
+      }
+    }
+  }
+}
+
+// Función para detectar si la página está disponible
+async function isPageResponsive(page) {
+  try {
+    await page.evaluate(() => document.title);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Función para verificar si Puppeteer está disponible
+async function checkPuppeteerAvailability() {
+  try {
+    const browserConfig = getBrowserConfig();
+    const browser = await puppeteer.launch(browserConfig);
+    await browser.close();
+    return true;
+  } catch (error) {
+    console.error('❌ Puppeteer no está disponible:', error.message);
+    return false;
+  }
+}
+
+// Función principal de conversión
+async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
+  let browser = null;
+  let page = null;
+  
+  try {
+    console.log(`🚀 Iniciando conversión: ${tipo} ${cantidad} ${moneda}`);
+    
+    // Obtener configuración del browser para el entorno actual
+    const browserConfig = getBrowserConfig();
+    console.log('🔧 Configuración del browser:', {
+      isProduction: process.env.NODE_ENV === 'production',
+      executablePath: browserConfig.executablePath || 'default',
+      argsCount: browserConfig.args.length
     });
+    
+    // Lanzar browser con configuración robusta
+    browser = await puppeteer.launch(browserConfig);
+    console.log('✅ Browser lanzado correctamente');
 
     // Crear página con configuración robusta
     page = await browser.newPage();
+    console.log('✅ Nueva página creada');
     
     // Configurar página para máxima estabilidad
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
     await page.setDefaultTimeout(CONFIG.timeouts.selector);
     await page.setDefaultNavigationTimeout(CONFIG.timeouts.navigation);
+    
+    // Configuraciones adicionales para estabilidad
+    await page.setViewport({ width: 1200, height: 800 });
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+    });
 
-    // Navegación ultra-robusta
+    console.log('✅ Página configurada');
+
+    // Navegación ultra-robusta con reintentos
     let navigationSuccess = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    const maxNavAttempts = 3;
+    
+    for (let attempt = 1; attempt <= maxNavAttempts; attempt++) {
       try {
+        console.log(`🌐 Intento de navegación ${attempt}/${maxNavAttempts}...`);
+        
         await page.goto('https://www.banregio.com/divisas.php#!', {
           waitUntil: ['networkidle0', 'domcontentloaded'],
           timeout: CONFIG.timeouts.navigation,
         });
         
+        console.log('✅ Navegación inicial completada');
+        
         // Verificar que la página realmente cargó
         await delay(CONFIG.delays.afterNavigation);
         
         if (await isPageResponsive(page)) {
+          console.log('✅ Página responde correctamente');
           navigationSuccess = true;
           break;
         } else {
@@ -139,23 +263,30 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
         }
         
       } catch (navError) {
-        if (attempt === 3) throw navError;
-        await delay(2000);
+        console.log(`❌ Intento de navegación ${attempt} falló:`, navError.message);
+        if (attempt === maxNavAttempts) {
+          throw new Error(`No se pudo navegar después de ${maxNavAttempts} intentos: ${navError.message}`);
+        }
+        await delay(CONFIG.delays.betweenRetries);
       }
     }
 
     if (!navigationSuccess) {
-      throw new Error('No se pudo navegar a la página después de 3 intentos');
+      throw new Error('No se pudo navegar a la página después de todos los intentos');
     }
 
-    // Esperar elementos críticos
+    // Esperar elementos críticos de la página
+    console.log('🔍 Esperando elementos críticos...');
     await page.waitForFunction(() => {
       const texto = document.body.textContent.toLowerCase();
       return texto.includes('comprar') && texto.includes('vender');
     }, { timeout: CONFIG.timeouts.selector });
+    
+    console.log('✅ Elementos críticos encontrados');
 
     // Hacer click en comprar/vender con método ultra-robusto
     const tipoTexto = tipo === 'comprar' ? 'comprar' : 'vender';
+    console.log(`🖱️ Haciendo click en "${tipoTexto}"...`);
     
     const clickResult = await page.evaluate((tipoTexto) => {
       // Función para hacer click seguro
@@ -164,23 +295,33 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
           // Scroll al elemento si es necesario
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           
-          // Múltiples métodos de click
-          if (element.click) {
-            element.click();
-            return true;
-          }
-          
-          // Dispatch click event
-          const clickEvent = new MouseEvent('click', {
-            view: window,
-            bubbles: true,
-            cancelable: true
+          // Esperar un poco después del scroll
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              try {
+                // Múltiples métodos de click
+                if (element.click) {
+                  element.click();
+                  resolve(true);
+                  return;
+                }
+                
+                // Dispatch click event
+                const clickEvent = new MouseEvent('click', {
+                  view: window,
+                  bubbles: true,
+                  cancelable: true
+                });
+                element.dispatchEvent(clickEvent);
+                resolve(true);
+                
+              } catch (e) {
+                resolve(false);
+              }
+            }, 500);
           });
-          element.dispatchEvent(clickEvent);
-          return true;
-          
         } catch (e) {
-          return false;
+          return Promise.resolve(false);
         }
       }
       
@@ -216,6 +357,7 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
       return 'No se pudo hacer click';
     }, tipoTexto);
 
+    console.log('✅ Resultado del click:', clickResult);
     await delay(CONFIG.delays.afterClick);
 
     // Verificar que la página sigue respondiendo
@@ -224,6 +366,7 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
     }
 
     // Buscar e interactuar con selector de moneda
+    console.log('💱 Configurando moneda...');
     try {
       // Buscar selector de moneda de forma robusta
       const selectorFound = await page.waitForFunction(() => {
@@ -243,14 +386,16 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
             }
           }
         }, moneda);
+        console.log(`✅ Moneda configurada: ${moneda}`);
       }
     } catch (e) {
-      // Continuar sin selector de moneda
+      console.log('⚠️ No se encontró selector de moneda, continuando...');
     }
 
     await delay(CONFIG.delays.beforeCalculation);
 
     // Buscar e interactuar con campo de cantidad
+    console.log('🔢 Configurando cantidad...');
     const quantityInputFound = await page.waitForFunction(() => {
       const inputs = document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])');
       for (let input of inputs) {
@@ -291,16 +436,19 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
           }
         }
       }, cantidad);
+      
+      console.log(`✅ Cantidad configurada: ${cantidad}`);
     } else {
       throw new Error('No se encontró campo de cantidad');
     }
 
     // Esperar y obtener resultado con timeout extendido
+    console.log('⏳ Esperando resultado del cálculo...');
     let resultado = null;
     const startTime = Date.now();
     
     while (!resultado && (Date.now() - startTime) < CONFIG.timeouts.calculation) {
-      await delay(500);
+      await delay(1000); // Aumentado el delay entre verificaciones
       
       if (!(await isPageResponsive(page))) {
         throw new Error('La página dejó de responder durante el cálculo');
@@ -350,11 +498,13 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
         });
         
         if (resultado) {
+          console.log('✅ Resultado obtenido:', resultado);
           break;
         }
         
       } catch (e) {
         // Continuar intentando
+        console.log('⏳ Esperando resultado...');
       }
     }
 
@@ -366,14 +516,22 @@ async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 30
     const mxn = resultado.value;
     const tipoCambio = mxn / cantidad;
 
-    return {
+    const resultadoFinal = {
       mxn: parseFloat(mxn.toFixed(2)),
       tipoCambio: parseFloat(tipoCambio.toFixed(4)),
       tipo,
       moneda,
-      cantidad
+      cantidad,
+      fuente: 'banregio-puppeteer',
+      timestamp: new Date().toISOString()
     };
+    
+    console.log('🎉 Conversión completada:', resultadoFinal);
+    return resultadoFinal;
 
+  } catch (error) {
+    console.error('❌ Error en convertirDivisa:', error.message);
+    throw error;
   } finally {
     // Cleanup ultra-seguro
     await safeCloseBrowser(browser);
@@ -385,7 +543,10 @@ async function convertirDivisaConRetry(params, reintentos = 0) {
   try {
     return await convertirDivisa(params);
   } catch (error) {
+    console.error(`❌ Intento ${reintentos + 1} falló:`, error.message);
+    
     if (reintentos < CONFIG.maxRetries) {
+      console.log(`🔄 Reintentando en ${CONFIG.delays.betweenRetries}ms...`);
       await delay(CONFIG.delays.betweenRetries);
       return await convertirDivisaConRetry(params, reintentos + 1);
     } else {
@@ -425,12 +586,27 @@ function validateConversionParams(req, res, next) {
 // RUTAS DE LA API
 
 // Ruta de salud
-app.get('/api/health', (req, res) => {
-  res.json({
+app.get('/api/health', async (req, res) => {
+  const healthCheck = {
     status: 'OK',
     timestamp: new Date().toISOString(),
-    service: 'Currency Conversion API'
-  });
+    service: 'Currency Conversion API (Puppeteer)',
+    version: '2.0',
+    environment: process.env.NODE_ENV || 'development',
+    puppeteer: 'checking...'
+  };
+  
+  // Verificar disponibilidad de Puppeteer
+  try {
+    const puppeteerAvailable = await checkPuppeteerAvailability();
+    healthCheck.puppeteer = puppeteerAvailable ? 'available' : 'not available';
+    healthCheck.status = puppeteerAvailable ? 'OK' : 'WARNING';
+  } catch (error) {
+    healthCheck.puppeteer = `error: ${error.message}`;
+    healthCheck.status = 'ERROR';
+  }
+  
+  res.json(healthCheck);
 });
 
 // Ruta principal de conversión
@@ -440,7 +616,7 @@ app.post('/api/convert', validateConversionParams, async (req, res) => {
   try {
     const { tipo = 'comprar', moneda = 'USD', cantidad = 300 } = req.body;
     
-    console.log(`🔄 Iniciando conversión: ${tipo} ${cantidad} ${moneda}`);
+    console.log(`🔄 Iniciando conversión POST: ${tipo} ${cantidad} ${moneda}`);
     
     const resultado = await convertirDivisaConRetry({
       tipo,
@@ -456,17 +632,18 @@ app.post('/api/convert', validateConversionParams, async (req, res) => {
       data: resultado,
       meta: {
         processingTimeMs: processingTime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        method: 'POST'
       }
     });
     
-    console.log(`✅ Conversión exitosa en ${processingTime}ms`);
+    console.log(`✅ Conversión POST exitosa en ${processingTime}ms`);
     
   } catch (error) {
     const endTime = Date.now();
     const processingTime = endTime - startTime;
     
-    console.error(`❌ Error en conversión: ${error.message}`);
+    console.error(`❌ Error en conversión POST: ${error.message}`);
     
     res.status(500).json({
       success: false,
@@ -474,7 +651,8 @@ app.post('/api/convert', validateConversionParams, async (req, res) => {
       message: error.message,
       meta: {
         processingTimeMs: processingTime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        method: 'POST'
       }
     });
   }
@@ -526,7 +704,8 @@ app.get('/api/convert/:tipo/:moneda/:cantidad', async (req, res) => {
       data: resultado,
       meta: {
         processingTimeMs: processingTime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        method: 'GET'
       }
     });
     
@@ -544,7 +723,8 @@ app.get('/api/convert/:tipo/:moneda/:cantidad', async (req, res) => {
       message: error.message,
       meta: {
         processingTimeMs: processingTime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        method: 'GET'
       }
     });
   }
@@ -586,7 +766,8 @@ app.use((error, req, res, next) => {
 
 // Iniciar servidor
 const server = app.listen(PORT, () => {
-  console.log(`🚀 API de Conversión de Divisas iniciada en puerto ${PORT}`);
+  console.log(`🚀 API de Conversión de Divisas (Puppeteer) iniciada en puerto ${PORT}`);
+  console.log(`🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📍 Endpoints disponibles:`);
   console.log(`   GET  http://localhost:${PORT}/api/health`);
   console.log(`   POST http://localhost:${PORT}/api/convert`);
@@ -609,6 +790,17 @@ process.on('SIGINT', () => {
     console.log('✅ Servidor cerrado correctamente');
     process.exit(0);
   });
+});
+
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Excepción no capturada:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promesa rechazada no manejada:', reason);
+  process.exit(1);
 });
 
 module.exports = app;
