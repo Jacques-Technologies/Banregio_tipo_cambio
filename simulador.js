@@ -10,7 +10,7 @@ async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tip
     // Obtener la ruta del ejecutable de forma más segura
     let executablePath;
     try {
-      executablePath = await chromium.executablePath;
+      executablePath = await chromium.executablePath();
       console.log('🔍 Ruta del ejecutable:', executablePath);
     } catch (pathError) {
       console.log('⚠️ Error obteniendo ruta, usando alternativa...');
