@@ -1,4 +1,4 @@
-const chromium = require('chrome-aws-lambda');
+const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 
 async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tipoOperacion = 'compra') {
