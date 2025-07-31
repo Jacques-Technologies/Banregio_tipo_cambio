@@ -48,292 +48,368 @@ function setCache(key, data) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// ✅ FUNCIÓN PARA ANÁLISIS DETALLADO DEL HTML (DEBUG)
-async function analizarHTMLDetallado() {
+// ✅ FUNCIÓN DE DIAGNÓSTICO COMPLETO DE LA PÁGINA
+async function diagnosticarPaginaBanregio() {
   try {
-    console.log('🔍 Iniciando análisis detallado del HTML...');
+    console.log('🔬 Iniciando diagnóstico completo de la página...');
     
     const response = await axios.get('https://www.banregio.com/divisas.php', {
-      headers: {
-        ...headers,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-      }
+      headers,
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 500
     });
     
-    const $ = cheerio.load(response.data);
-    const analysis = {
-      pageInfo: {
-        title: $('title').text().trim(),
-        htmlSize: response.data.length,
-        timestamp: new Date().toISOString()
+    const diagnostico = {
+      respuesta: {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        tamano: response.data.length,
+        contentType: response.headers['content-type']
       },
-      elements: {
-        scripts: [],
-        inputs: [],
-        selects: [],
-        forms: [],
-        tables: [],
-        divs: []
-      },
-      content: {
-        allNumbers: [],
-        currencyMentions: {},
-        potentialRates: []
+      contenido: {
+        primeros1000chars: response.data.substring(0, 1000),
+        ultimos500chars: response.data.substring(response.data.length - 500),
+        tieneHTML: response.data.includes('<html'),
+        tieneBody: response.data.includes('<body'),
+        tieneScripts: response.data.includes('<script'),
+        tieneCSS: response.data.includes('<style') || response.data.includes('.css'),
+        mencionaDivisa: response.data.toLowerCase().includes('divisa'),
+        mencionaConvertidor: response.data.toLowerCase().includes('convertidor')
       }
     };
     
-    // Analizar scripts
-    $('script').each((i, script) => {
-      const content = $(script).html();
-      const src = $(script).attr('src');
+    // Solo cargar con cheerio si parece HTML válido
+    if (diagnostico.contenido.tieneHTML && response.data.length > 500) {
+      const $ = cheerio.load(response.data);
       
-      if (content) {
-        const hasNumbers = /\d{1,2}\.\d{2,4}/.test(content);
-        const hasCurrency = /(USD|EUR|CAD|GBP|JPY|divisa|currency)/i.test(content);
-        const hasAjax = /(ajax|xhr|fetch|post|get)/i.test(content);
+      diagnostico.estructura = {
+        titulo: $('title').text(),
+        metaDescription: $('meta[name="description"]').attr('content'),
+        totalElementos: $('*').length,
+        scripts: $('script').length,
+        stylesheets: $('link[rel="stylesheet"]').length,
+        inputs: $('input').length,
+        selects: $('select').length,
+        forms: $('form').length,
+        buttons: $('button').length
+      };
+      
+      // Buscar elementos específicos mencionados
+      diagnostico.elementosEspecificos = {
+        divisa: $('#divisa').length,
+        mxn: $('#mxn').length,
+        customSelect: $('.custom-select').length,
+        py5TextCenter: $('.py-5.text-center').length
+      };
+      
+      // Información detallada de inputs
+      diagnostico.todosLosInputs = [];
+      $('input').each((i, input) => {
+        const $input = $(input);
+        diagnostico.todosLosInputs.push({
+          id: $input.attr('id'),
+          name: $input.attr('name'),
+          type: $input.attr('type'),
+          class: $input.attr('class'),
+          value: $input.val() || $input.attr('value'),
+          placeholder: $input.attr('placeholder')
+        });
+      });
+      
+      // Información detallada de selects
+      diagnostico.todosLosSelects = [];
+      $('select').each((i, select) => {
+        const $select = $(select);
+        const options = $select.find('option').map((j, opt) => ({
+          value: $(opt).attr('value'),
+          text: $(opt).text()
+        })).get();
         
-        analysis.elements.scripts.push({
-          index: i,
-          size: content.length,
-          hasNumbers,
-          hasCurrency,
-          hasAjax,
-          preview: content.substring(0, 200).replace(/\s+/g, ' ')
+        diagnostico.todosLosSelects.push({
+          id: $select.attr('id'),
+          name: $select.attr('name'),
+          class: $select.attr('class'),
+          options: options
         });
-      } else if (src) {
-        analysis.elements.scripts.push({
-          index: i,
-          external: true,
-          src
-        });
-      }
-    });
-    
-    // Analizar inputs
-    $('input').each((i, input) => {
-      const $input = $(input);
-      analysis.elements.inputs.push({
-        index: i,
-        id: $input.attr('id'),
-        name: $input.attr('name'),
-        type: $input.attr('type'),
-        class: $input.attr('class'),
-        value: $input.attr('value') || $input.val(),
-        placeholder: $input.attr('placeholder')
       });
-    });
+    }
     
-    // Analizar selects
-    $('select').each((i, select) => {
-      const $select = $(select);
-      const options = $select.find('option').map((j, opt) => ({
-        value: $(opt).attr('value'),
-        text: $(opt).text().trim()
-      })).get();
-      
-      analysis.elements.selects.push({
-        index: i,
-        id: $select.attr('id'),
-        name: $select.attr('name'),
-        class: $select.attr('class'),
-        options
-      });
-    });
-    
-    // Analizar formularios
-    $('form').each((i, form) => {
-      const $form = $(form);
-      analysis.elements.forms.push({
-        index: i,
-        action: $form.attr('action'),
-        method: $form.attr('method'),
-        id: $form.attr('id'),
-        class: $form.attr('class')
-      });
-    });
-    
-    // Analizar tablas
-    $('table').each((i, table) => {
-      const $table = $(table);
-      const rows = $table.find('tr').length;
-      const cells = $table.find('td, th').length;
-      const text = $table.text().replace(/\s+/g, ' ').trim();
-      
-      analysis.elements.tables.push({
-        index: i,
-        rows,
-        cells,
-        class: $table.attr('class'),
-        preview: text.substring(0, 200),
-        hasCurrency: /(USD|EUR|CAD|GBP|JPY)/i.test(text),
-        hasNumbers: /\d{1,2}\.\d{2,4}/.test(text)
-      });
-    });
-    
-    // Analizar divs importantes
-    $('div[class*="divisa"], div[class*="currency"], div[class*="exchange"], div[id*="calc"]').each((i, div) => {
-      const $div = $(div);
-      const text = $div.text().replace(/\s+/g, ' ').trim();
-      
-      analysis.elements.divs.push({
-        index: i,
-        id: $div.attr('id'),
-        class: $div.attr('class'),
-        preview: text.substring(0, 200),
-        hasNumbers: /\d{1,2}\.\d{2,4}/.test(text)
-      });
-    });
-    
-    // Analizar contenido numérico
-    const allText = response.data.replace(/<[^>]+>/g, ' ');
-    const numbers = allText.match(/\b\d{1,2}\.\d{2,4}\b/g) || [];
-    analysis.content.allNumbers = [...new Set(numbers)].map(n => parseFloat(n)).sort((a, b) => a - b);
-    
-    // Buscar menciones de monedas
-    const currencies = ['USD', 'EUR', 'CAD', 'GBP', 'JPY'];
-    currencies.forEach(currency => {
-      const mentions = (allText.match(new RegExp(currency, 'gi')) || []).length;
-      analysis.content.currencyMentions[currency] = mentions;
-    });
-    
-    // Identificar posibles tasas
-    analysis.content.potentialRates = analysis.content.allNumbers.filter(n => 
-      (n >= 15 && n <= 25) || // USD range
-      (n >= 18 && n <= 30) || // EUR range
-      (n >= 12 && n <= 16) || // CAD range
-      (n >= 20 && n <= 28) || // GBP range
-      (n >= 0.1 && n <= 0.2)  // JPY range
-    );
-    
-    return analysis;
+    return diagnostico;
     
   } catch (error) {
-    console.error('❌ Error en análisis detallado:', error.message);
-    throw error;
+    return {
+      error: error.message,
+      tipo: error.constructor.name,
+      stack: error.stack
+    };
   }
 }
 
-// ✅ FUNCIÓN MEJORADA PARA EXTRAER VALOR MXN ESPECÍFICO
+// Endpoint para diagnóstico completo
+app.get('/api/diagnostico', async (req, res) => {
+  try {
+    const diagnostico = await diagnosticarPaginaBanregio();
+    res.json({
+      success: true,
+      data: diagnostico,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ FUNCIÓN MEJORADA PARA EXTRAER VALOR MXN CON DIAGNÓSTICO COMPLETO
 async function extraerValorMXNEspecifico({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
   try {
     console.log(`🎯 Extrayendo valor MXN específico: ${tipo} ${cantidad} ${moneda}`);
     
-    // Obtener la página inicial
+    // Obtener la página inicial con configuración más robusta
     const response = await axios.get('https://www.banregio.com/divisas.php', {
-      headers: {
-        ...headers,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-      }
+      headers,
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 400,
+      decompress: true
     });
+    
+    console.log('🌐 Respuesta obtenida:');
+    console.log(`  - Status: ${response.status}`);
+    console.log(`  - Headers: ${JSON.stringify(response.headers['content-type'])}`);
+    console.log(`  - Tamaño: ${response.data.length} caracteres`);
+    console.log(`  - Primeros 500 chars: "${response.data.substring(0, 500)}"`);
+    
+    // Verificar si el contenido es válido HTML
+    if (response.data.length < 1000) {
+      console.log('⚠️ HTML muy pequeño, posible problema de carga');
+      console.log('📄 Contenido completo:', response.data);
+    }
     
     const $ = cheerio.load(response.data);
     
-    console.log('🔍 Buscando elementos específicos identificados...');
+    console.log('🔍 Información de la página:');
+    console.log(`  - Título: "${$('title').text()}"`);
+    console.log(`  - Meta description: "${$('meta[name="description"]').attr('content')}"`);
+    console.log(`  - Total elementos: ${$('*').length}`);
+    console.log(`  - Scripts: ${$('script').length}`);
+    console.log(`  - Stylesheets: ${$('link[rel="stylesheet"]').length}`);
     
-    // Verificar que los elementos clave existan
-    const divisaInput = $('#divisa');
-    const mxnInput = $('#mxn');
-    const customSelect = $('.custom-select');
-    const comprarBtn = $('.py-5.text-center').find(':contains("Quiero comprar")');
-    const venderBtn = $('.py-5.text-center').find(':contains("Quiero vender")');
+    // Buscar todas las variaciones posibles de los elementos
+    console.log('🔍 Buscando elementos con múltiples estrategias...');
     
-    console.log('📊 Elementos encontrados:');
-    console.log('  - Input divisa (#divisa):', divisaInput.length > 0 ? '✅' : '❌');
-    console.log('  - Input MXN (#mxn):', mxnInput.length > 0 ? '✅' : '❌');
-    console.log('  - Select moneda (.custom-select):', customSelect.length > 0 ? '✅' : '❌');
-    console.log('  - Botón comprar:', comprarBtn.length > 0 ? '✅' : '❌');
-    console.log('  - Botón vender:', venderBtn.length > 0 ? '✅' : '❌');
+    const elementVariations = {
+      divisaInputs: [
+        '#divisa',
+        'input[name="divisa"]',
+        'input[id*="divisa"]',
+        'input[placeholder*="divisa"]',
+        'input[class*="divisa"]'
+      ],
+      mxnInputs: [
+        '#mxn',
+        'input[name="mxn"]',
+        'input[id*="mxn"]',
+        'input[placeholder*="mxn"]',
+        'input[class*="mxn"]'
+      ],
+      currencySelects: [
+        '.custom-select',
+        'select[name*="moneda"]',
+        'select[name*="currency"]',
+        'select[id*="moneda"]',
+        'select[id*="currency"]'
+      ],
+      actionButtons: [
+        '.py-5.text-center',
+        '[class*="py-5"]',
+        '[class*="text-center"]',
+        'button:contains("comprar")',
+        'button:contains("vender")',
+        'a:contains("comprar")',
+        'a:contains("vender")'
+      ]
+    };
     
-    // Extraer valores actuales
-    const currentDivisaValue = divisaInput.val() || divisaInput.attr('value') || '';
-    const currentMxnValue = mxnInput.val() || mxnInput.attr('value') || '';
-    const currentSelectedCurrency = customSelect.val() || customSelect.find('option:selected').attr('value') || '';
+    const foundElements = {};
     
-    console.log('💱 Valores actuales:');
-    console.log(`  - Divisa input: "${currentDivisaValue}"`);
-    console.log(`  - MXN input: "${currentMxnValue}"`);
-    console.log(`  - Moneda seleccionada: "${currentSelectedCurrency}"`);
-    
-    // Si el valor MXN actual coincide con nuestros parámetros, usarlo
-    if (currentDivisaValue && currentMxnValue && 
-        parseFloat(currentDivisaValue) === cantidad && 
-        currentSelectedCurrency === moneda) {
+    Object.entries(elementVariations).forEach(([category, selectors]) => {
+      foundElements[category] = [];
       
-      const mxnValue = parseFloat(currentMxnValue.replace(/[,$]/g, ''));
-      console.log(`✅ Valor MXN encontrado directamente: ${mxnValue}`);
+      selectors.forEach(selector => {
+        try {
+          const elements = $(selector);
+          if (elements.length > 0) {
+            elements.each((i, el) => {
+              const $el = $(el);
+              foundElements[category].push({
+                selector,
+                tag: $el.prop('tagName'),
+                id: $el.attr('id'),
+                class: $el.attr('class'),
+                name: $el.attr('name'),
+                value: $el.val() || $el.attr('value'),
+                text: $el.text().trim().substring(0, 100)
+              });
+            });
+          }
+        } catch (e) {
+          // Selector inválido, ignorar
+        }
+      });
       
-      return {
-        mxn: mxnValue,
-        tipoCambio: parseFloat((mxnValue / cantidad).toFixed(4)),
+      console.log(`  - ${category}: ${foundElements[category].length} elementos`);
+      foundElements[category].forEach((el, i) => {
+        console.log(`    ${i + 1}. ${el.tag} id="${el.id}" class="${el.class}" value="${el.value}"`);
+      });
+    });
+    
+    // Buscar cualquier input que pueda ser relevante
+    console.log('🔍 Todos los inputs en la página:');
+    $('input').each((i, input) => {
+      const $input = $(input);
+      console.log(`  ${i + 1}. type="${$input.attr('type')}" id="${$input.attr('id')}" name="${$input.attr('name')}" class="${$input.attr('class')}" value="${$input.val() || $input.attr('value')}"`);
+    });
+    
+    // Buscar todos los selects
+    console.log('🔍 Todos los selects en la página:');
+    $('select').each((i, select) => {
+      const $select = $(select);
+      const options = $select.find('option').map((j, opt) => `"${$(opt).attr('value')}:${$(opt).text()}"`).get();
+      console.log(`  ${i + 1}. id="${$select.attr('id')}" name="${$select.attr('name')}" class="${$select.attr('class')}" options=[${options.join(', ')}]`);
+    });
+    
+    // Si encontramos elementos, intentar usarlos
+    const divisaInput = foundElements.divisaInputs[0];
+    const mxnInput = foundElements.mxnInputs[0];
+    
+    if (divisaInput && mxnInput) {
+      console.log('✅ Elementos básicos encontrados, intentando simulación');
+      
+      // Intentar simular llenado del formulario y envío
+      return await simularCalculadoraConDatosEspecificos({
         tipo,
         moneda,
         cantidad,
-        fuente: 'banregio-direct-extraction',
-        timestamp: new Date().toISOString(),
-        detalles: {
-          selector: '#mxn',
-          rawValue: currentMxnValue,
-          method: 'direct-html-extraction'
-        }
-      };
+        divisaSelector: divisaInput.selector,
+        mxnSelector: mxnInput.selector,
+        pageData: response.data,
+        cookies: response.headers['set-cookie']
+      });
     }
     
-    // Buscar JavaScript que maneje la calculadora
-    console.log('🔍 Analizando JavaScript de la calculadora...');
+    // Si no encontramos los elementos esperados, intentar reverse engineering
+    console.log('⚠️ Elementos principales no encontrados, analizando estructura completa...');
     
-    let jsCalculatorFound = false;
-    const calculatorInfo = {
-      functions: [],
-      variables: [],
-      eventHandlers: []
-    };
+    // Buscar patrones en el HTML que indiquen una calculadora
+    const calculatorPatterns = [
+      /calculator/gi,
+      /convertidor/gi,
+      /divisa/gi,
+      /exchange/gi,
+      /tipo.*cambio/gi
+    ];
     
-    $('script').each((i, script) => {
-      const content = $(script).html();
-      if (content && (content.includes('divisa') || content.includes('mxn') || content.includes('custom-select'))) {
-        jsCalculatorFound = true;
-        
-        // Buscar funciones relacionadas
-        const functionMatches = content.match(/function\s+(\w*(?:calc|convert|divisa|mxn)\w*)/gi) || [];
-        calculatorInfo.functions.push(...functionMatches);
-        
-        // Buscar event handlers
-        const eventMatches = content.match(/\$\([^)]*\)\.(?:click|change|keyup|input)\([^)]*\)/gi) || [];
-        calculatorInfo.eventHandlers.push(...eventMatches);
-        
-        // Buscar variables con tasas
-        const rateMatches = content.match(/(?:var|let|const)\s+\w*(?:rate|tasa|tipo)\w*\s*=\s*[\d.]+/gi) || [];
-        calculatorInfo.variables.push(...rateMatches);
+    const htmlText = response.data;
+    calculatorPatterns.forEach(pattern => {
+      const matches = htmlText.match(pattern);
+      if (matches) {
+        console.log(`📍 Patrón "${pattern}" encontrado ${matches.length} veces`);
       }
     });
     
-    console.log('📜 JavaScript de calculadora:', jsCalculatorFound ? '✅ Encontrado' : '❌ No encontrado');
-    console.log('  - Funciones:', calculatorInfo.functions.length);
-    console.log('  - Event handlers:', calculatorInfo.eventHandlers.length);
-    console.log('  - Variables:', calculatorInfo.variables.length);
-    
-    // Buscar formularios y sus acciones
-    const forms = $('form');
-    console.log(`📝 Formularios encontrados: ${forms.length}`);
-    
-    forms.each((i, form) => {
-      const $form = $(form);
-      const action = $form.attr('action') || 'current-page';
-      const method = $form.attr('method') || 'GET';
-      console.log(`  - Formulario ${i + 1}: ${method} ${action}`);
-    });
-    
-    // Intentar simular la calculadora con POST
-    return await simularCalculadoraConElementosEspecificos({
-      tipo,
-      moneda,
-      cantidad,
-      pageHtml: response.data,
-      cookies: response.headers['set-cookie']
-    });
+    throw new Error('No se pudieron encontrar los elementos específicos de la calculadora');
     
   } catch (error) {
     console.error('❌ Error extrayendo valor MXN específico:', error.message);
+    throw error;
+  }
+}
+
+// ✅ FUNCIÓN PARA SIMULAR CON DATOS ESPECÍFICOS ENCONTRADOS
+async function simularCalculadoraConDatosEspecificos({ tipo, moneda, cantidad, divisaSelector, mxnSelector, pageData, cookies }) {
+  try {
+    console.log('🎯 Simulando con datos específicos encontrados...');
+    console.log(`  - Selector divisa: ${divisaSelector}`);
+    console.log(`  - Selector MXN: ${mxnSelector}`);
+    
+    const $ = cheerio.load(pageData);
+    
+    // Extraer todos los parámetros del formulario
+    const formData = {};
+    
+    $('input, select, textarea').each((i, el) => {
+      const $el = $(el);
+      const name = $el.attr('name');
+      const value = $el.attr('value') || $el.val() || '';
+      
+      if (name) {
+        formData[name] = value;
+      }
+    });
+    
+    // Agregar nuestros datos específicos
+    formData.divisa = cantidad;
+    formData.moneda = moneda;
+    formData.tipo = tipo;
+    
+    console.log('📤 Enviando formulario con datos:', Object.keys(formData));
+    
+    // Hacer petición POST
+    const response = await axios.post('https://www.banregio.com/divisas.php', 
+      new URLSearchParams(formData).toString(), 
+      {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://www.banregio.com/divisas.php',
+          ...(cookies && { 'Cookie': cookies.join('; ') })
+        },
+        timeout: 15000
+      }
+    );
+    
+    console.log(`📡 Respuesta POST: ${response.status}, tamaño: ${response.data.length}`);
+    
+    // Analizar respuesta
+    const $response = cheerio.load(response.data);
+    
+    // Buscar el valor MXN en la respuesta
+    const mxnElement = $response(mxnSelector);
+    
+    if (mxnElement.length > 0) {
+      const mxnValue = mxnElement.val() || mxnElement.attr('value') || mxnElement.text();
+      console.log(`🎯 Valor encontrado con ${mxnSelector}: "${mxnValue}"`);
+      
+      if (mxnValue && mxnValue !== '0' && !isNaN(parseFloat(mxnValue))) {
+        const numValue = parseFloat(mxnValue.replace(/[,$]/g, ''));
+        
+        return {
+          mxn: parseFloat(numValue.toFixed(2)),
+          tipoCambio: parseFloat((numValue / cantidad).toFixed(4)),
+          tipo,
+          moneda,
+          cantidad,
+          fuente: 'banregio-specific-selectors',
+          timestamp: new Date().toISOString(),
+          detalles: {
+            divisaSelector,
+            mxnSelector,
+            rawValue: mxnValue,
+            method: 'form-post-with-specific-selectors'
+          }
+        };
+      }
+    }
+    
+    throw new Error(`No se pudo obtener valor MXN del selector ${mxnSelector}`);
+    
+  } catch (error) {
+    console.error('❌ Error en simulación con datos específicos:', error.message);
     throw error;
   }
 }
@@ -879,7 +955,7 @@ app.get('/api/convert/:tipo/:moneda/:cantidad', validateParams, async (req, res)
 // Endpoint para análisis detallado de la página
 app.get('/api/analyze', async (req, res) => {
   try {
-    const analysis = await analizarHTMLDetallado();
+    const analysis = await diagnosticarPaginaBanregio();
     res.json({
       success: true,
       data: analysis,
@@ -946,7 +1022,7 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
     
     // Análisis del HTML
     try {
-      debugInfo.htmlAnalysis = await analizarHTMLDetallado();
+      debugInfo.htmlAnalysis = await diagnosticarPaginaBanregio();
     } catch (htmlError) {
       debugInfo.htmlAnalysis = { error: htmlError.message };
     }
@@ -975,11 +1051,20 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
 // Endpoint para ver todas las tasas actuales
 app.get('/api/rates', async (req, res) => {
   try {
+    const diagnostico = await diagnosticarPaginaBanregio();
     const resultado = await calcularConLogicaReversa({ tipo: 'comprar', moneda: 'USD', cantidad: 1 });
     
     res.json({
       success: true,
-      data: resultado.detalles,
+      data: {
+        tasas: resultado.detalles,
+        diagnostico: {
+          paginaCargada: diagnostico.contenido?.tieneHTML || false,
+          elementosEncontrados: diagnostico.elementosEspecificos || {},
+          totalInputs: diagnostico.estructura?.inputs || 0,
+          totalSelects: diagnostico.estructura?.selects || 0
+        }
+      },
       meta: {
         timestamp: new Date().toISOString(),
         fuente: resultado.fuente
@@ -1017,9 +1102,9 @@ app.get('/api/currencies', (req, res) => {
 // Info de la API
 app.get('/api/info', (req, res) => {
   res.json({
-    service: 'Banregio Currency API (Specific Elements Extraction)',
-    version: '3.0',
-    descripcion: 'API especializada para conversión de divisas usando elementos específicos identificados (#divisa, #mxn, .custom-select)',
+    service: 'Banregio Currency API (Diagnostic & Specific Elements)',
+    version: '3.1',
+    descripcion: 'API con diagnóstico completo y extracción de elementos específicos de la calculadora de Banregio',
     target: 'https://www.banregio.com/divisas.php',
     methods: [
       'Specific Elements Extraction (Primary)',
@@ -1028,12 +1113,15 @@ app.get('/api/info', (req, res) => {
       'Updated Fallback Rates'
     ],
     features: [
+      'Diagnóstico completo de la estructura de la página',
+      'Headers mejorados para simular navegador real',
+      'Detección automática de elementos con múltiples selectores',
       'Extracción directa del input #mxn',
       'Simulación exacta del formulario con selectores específicos',
       'Identificación de elementos .py-5.text-center para tipo',
       'Uso del select .custom-select para moneda',
       'Análisis JavaScript de calculadora',
-      'Debug detallado con 3 métodos'
+      'Debug detallado con 3 métodos + diagnóstico'
     ],
     endpoints: [
       'GET  /api/health',
@@ -1041,6 +1129,7 @@ app.get('/api/info', (req, res) => {
       'GET  /api/convert/:tipo/:moneda/:cantidad',
       'GET  /api/rates',
       'GET  /api/analyze',
+      'GET  /api/diagnostico',
       'GET  /api/debug/:tipo/:moneda/:cantidad',
       'DELETE /api/cache',
       'GET  /api/currencies',
@@ -1050,11 +1139,13 @@ app.get('/api/info', (req, res) => {
       conversion: '/api/convert/comprar/USD/500',
       debug: '/api/debug/comprar/USD/300',
       analyze: '/api/analyze',
+      diagnostico: '/api/diagnostico',
       body: { tipo: 'comprar', moneda: 'USD', cantidad: 500 }
     },
     debugging: {
       description: 'Usa /api/debug/tipo/moneda/cantidad para diagnóstico detallado',
-      analyze: 'Usa /api/analyze para análisis completo del HTML'
+      analyze: 'Usa /api/analyze para análisis completo del HTML',
+      diagnostico: 'Usa /api/diagnostico para diagnóstico completo de la página'
     }
   });
 });
@@ -1078,11 +1169,12 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 API Banregio (Specific Elements) iniciada en puerto ${PORT}`);
+  console.log(`🚀 API Banregio (Diagnóstico Completo) iniciada en puerto ${PORT}`);
   console.log(`🎯 Target: https://www.banregio.com/divisas.php`);
-  console.log(`💡 Modo: Specific Elements (#divisa, #mxn, .custom-select) + Fallbacks`);
-  console.log(`🔧 Elementos: Input #divisa, Input #mxn, Select .custom-select`);
+  console.log(`💡 Modo: Diagnóstico + Extracción Específica + Fallbacks`);
+  console.log(`🔧 Elementos objetivo: #divisa, #mxn, .custom-select, .py-5.text-center`);
   console.log(`📋 Info: http://localhost:${PORT}/api/info`);
+  console.log(`🔬 Diagnóstico: http://localhost:${PORT}/api/diagnostico`);
   console.log(`🐛 Debug: http://localhost:${PORT}/api/debug/comprar/USD/300`);
 });
 
