@@ -1,5 +1,4 @@
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer');
 
 async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tipoOperacion = 'compra') {
   let browser = null;
@@ -7,19 +6,9 @@ async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tip
   try {
     console.log('🚀 Iniciando browser...');
     
-    // Obtener la ruta del ejecutable de forma más segura
-    let executablePath;
-    try {
-      executablePath = await chromium.executablePath();
-      console.log('🔍 Ruta del ejecutable:', executablePath);
-    } catch (pathError) {
-      console.log('⚠️ Error obteniendo ruta, usando alternativa...');
-      executablePath = '/usr/bin/chromium-browser';
-    }
-    
     browser = await puppeteer.launch({
+      headless: 'new',
       args: [
-        ...chromium.args,
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
@@ -29,11 +18,7 @@ async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tip
         '--disable-gpu',
         '--disable-web-security',
         '--disable-features=VizDisplayCompositor'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
+      ]
     });
 
     const page = await browser.newPage();
@@ -57,7 +42,9 @@ async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tip
     
     console.log(`💰 Ingresando cantidad: ${cantidad}...`);
     await page.click('#divisa');
-    await page.keyboard.selectAll();
+    await page.keyboard.down('Control');
+    await page.keyboard.press('a');
+    await page.keyboard.up('Control');
     await page.keyboard.type(String(cantidad), { delay: 50 });
     
     console.log(`🔘 Seleccionando operación: ${tipoOperacion}...`);
