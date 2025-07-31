@@ -213,216 +213,245 @@ async function analizarHTMLDetallado() {
   }
 }
 
-// ✅ FUNCIÓN PARA SIMULAR CALCULADORA AJAX CON ESTRATEGIA MEJORADA
-async function simularCalculadoraAjax({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
+// ✅ FUNCIÓN MEJORADA PARA EXTRAER VALOR MXN ESPECÍFICO
+async function extraerValorMXNEspecifico({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
   try {
-    console.log(`🎯 Simulando calculadora AJAX (mejorada): ${tipo} ${cantidad} ${moneda}`);
+    console.log(`🎯 Extrayendo valor MXN específico: ${tipo} ${cantidad} ${moneda}`);
     
-    // Primero obtener la página inicial
-    const pageResponse = await axios.get('https://www.banregio.com/divisas.php', {
+    // Obtener la página inicial
+    const response = await axios.get('https://www.banregio.com/divisas.php', {
       headers: {
         ...headers,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
       }
     });
     
-    const $ = cheerio.load(pageResponse.data);
-    const cookies = pageResponse.headers['set-cookie'];
+    const $ = cheerio.load(response.data);
     
-    // Extraer información crítica del formulario
-    const formData = {};
-    const csrfTokens = [];
+    console.log('🔍 Buscando elementos específicos identificados...');
     
-    // Buscar todos los inputs y tokens posibles
-    $('input, meta').each((i, el) => {
-      const $el = $(el);
-      const name = $el.attr('name') || $el.attr('property');
-      const value = $el.attr('value') || $el.attr('content');
+    // Verificar que los elementos clave existan
+    const divisaInput = $('#divisa');
+    const mxnInput = $('#mxn');
+    const customSelect = $('.custom-select');
+    const comprarBtn = $('.py-5.text-center').find(':contains("Quiero comprar")');
+    const venderBtn = $('.py-5.text-center').find(':contains("Quiero vender")');
+    
+    console.log('📊 Elementos encontrados:');
+    console.log('  - Input divisa (#divisa):', divisaInput.length > 0 ? '✅' : '❌');
+    console.log('  - Input MXN (#mxn):', mxnInput.length > 0 ? '✅' : '❌');
+    console.log('  - Select moneda (.custom-select):', customSelect.length > 0 ? '✅' : '❌');
+    console.log('  - Botón comprar:', comprarBtn.length > 0 ? '✅' : '❌');
+    console.log('  - Botón vender:', venderBtn.length > 0 ? '✅' : '❌');
+    
+    // Extraer valores actuales
+    const currentDivisaValue = divisaInput.val() || divisaInput.attr('value') || '';
+    const currentMxnValue = mxnInput.val() || mxnInput.attr('value') || '';
+    const currentSelectedCurrency = customSelect.val() || customSelect.find('option:selected').attr('value') || '';
+    
+    console.log('💱 Valores actuales:');
+    console.log(`  - Divisa input: "${currentDivisaValue}"`);
+    console.log(`  - MXN input: "${currentMxnValue}"`);
+    console.log(`  - Moneda seleccionada: "${currentSelectedCurrency}"`);
+    
+    // Si el valor MXN actual coincide con nuestros parámetros, usarlo
+    if (currentDivisaValue && currentMxnValue && 
+        parseFloat(currentDivisaValue) === cantidad && 
+        currentSelectedCurrency === moneda) {
       
-      if (name && value) {
-        formData[name] = value;
-        
-        // Detectar tokens
-        if (name.toLowerCase().includes('token') || name.toLowerCase().includes('csrf')) {
-          csrfTokens.push({ name, value });
+      const mxnValue = parseFloat(currentMxnValue.replace(/[,$]/g, ''));
+      console.log(`✅ Valor MXN encontrado directamente: ${mxnValue}`);
+      
+      return {
+        mxn: mxnValue,
+        tipoCambio: parseFloat((mxnValue / cantidad).toFixed(4)),
+        tipo,
+        moneda,
+        cantidad,
+        fuente: 'banregio-direct-extraction',
+        timestamp: new Date().toISOString(),
+        detalles: {
+          selector: '#mxn',
+          rawValue: currentMxnValue,
+          method: 'direct-html-extraction'
         }
+      };
+    }
+    
+    // Buscar JavaScript que maneje la calculadora
+    console.log('🔍 Analizando JavaScript de la calculadora...');
+    
+    let jsCalculatorFound = false;
+    const calculatorInfo = {
+      functions: [],
+      variables: [],
+      eventHandlers: []
+    };
+    
+    $('script').each((i, script) => {
+      const content = $(script).html();
+      if (content && (content.includes('divisa') || content.includes('mxn') || content.includes('custom-select'))) {
+        jsCalculatorFound = true;
+        
+        // Buscar funciones relacionadas
+        const functionMatches = content.match(/function\s+(\w*(?:calc|convert|divisa|mxn)\w*)/gi) || [];
+        calculatorInfo.functions.push(...functionMatches);
+        
+        // Buscar event handlers
+        const eventMatches = content.match(/\$\([^)]*\)\.(?:click|change|keyup|input)\([^)]*\)/gi) || [];
+        calculatorInfo.eventHandlers.push(...eventMatches);
+        
+        // Buscar variables con tasas
+        const rateMatches = content.match(/(?:var|let|const)\s+\w*(?:rate|tasa|tipo)\w*\s*=\s*[\d.]+/gi) || [];
+        calculatorInfo.variables.push(...rateMatches);
       }
     });
     
-    console.log('🔑 Tokens encontrados:', csrfTokens);
-    console.log('📝 Datos del formulario:', Object.keys(formData));
+    console.log('📜 JavaScript de calculadora:', jsCalculatorFound ? '✅ Encontrado' : '❌ No encontrado');
+    console.log('  - Funciones:', calculatorInfo.functions.length);
+    console.log('  - Event handlers:', calculatorInfo.eventHandlers.length);
+    console.log('  - Variables:', calculatorInfo.variables.length);
     
-    // Estrategia mejorada: Múltiples variaciones con headers más específicos
-    const requestVariations = [
-      // Variación 1: Simular exactamente como lo haría la calculadora web
-      {
-        method: 'POST',
-        data: {
-          tipo: tipo === 'comprar' ? 'compra' : 'venta', // Puede que use 'compra' en lugar de 'comprar'
-          moneda: moneda,
-          cantidad: cantidad,
-          divisa: cantidad,
-          mxn: '', // Campo vacío para llenar
-          action: 'calculate',
-          ajax: 1,
-          ...formData
-        },
-        headers: {
-          ...headers,
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest',
-          ...(cookies && { 'Cookie': cookies.join('; ') })
-        }
-      },
+    // Buscar formularios y sus acciones
+    const forms = $('form');
+    console.log(`📝 Formularios encontrados: ${forms.length}`);
+    
+    forms.each((i, form) => {
+      const $form = $(form);
+      const action = $form.attr('action') || 'current-page';
+      const method = $form.attr('method') || 'GET';
+      console.log(`  - Formulario ${i + 1}: ${method} ${action}`);
+    });
+    
+    // Intentar simular la calculadora con POST
+    return await simularCalculadoraConElementosEspecificos({
+      tipo,
+      moneda,
+      cantidad,
+      pageHtml: response.data,
+      cookies: response.headers['set-cookie']
+    });
+    
+  } catch (error) {
+    console.error('❌ Error extrayendo valor MXN específico:', error.message);
+    throw error;
+  }
+}
+
+// ✅ FUNCIÓN PARA SIMULAR CALCULADORA CON ELEMENTOS ESPECÍFICOS
+async function simularCalculadoraConElementosEspecificos({ tipo, moneda, cantidad, pageHtml, cookies }) {
+  try {
+    console.log('🎯 Simulando calculadora con elementos específicos...');
+    
+    const $ = cheerio.load(pageHtml);
+    
+    // Extraer todos los inputs del formulario para simular exactamente
+    const formData = {};
+    
+    $('input, select, textarea').each((i, el) => {
+      const $el = $(el);
+      const name = $el.attr('name');
+      const value = $el.attr('value') || $el.val() || '';
       
-      // Variación 2: Como si fuera una petición de JavaScript
+      if (name) {
+        formData[name] = value;
+      }
+    });
+    
+    // Datos específicos para la calculadora
+    const calculatorData = {
+      ...formData,
+      // Usar los nombres exactos que usa la calculadora
+      divisa: cantidad,           // Input #divisa
+      moneda: moneda,            // Select .custom-select  
+      tipo: tipo,                // Tipo de operación
+      // Posibles variaciones de nombres
+      currency: moneda,
+      amount: cantidad,
+      operation: tipo
+    };
+    
+    console.log('📤 Datos de calculadora preparados:', Object.keys(calculatorData));
+    
+    // Hacer petición POST simulando el formulario
+    const response = await axios.post('https://www.banregio.com/divisas.php', 
+      new URLSearchParams(calculatorData).toString(), 
       {
-        method: 'POST',
-        data: {
-          tipo,
-          currency: moneda,
-          amount: cantidad,
-          operation: tipo,
-          calc: 'true',
-          ...formData
-        },
         headers: {
           ...headers,
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': 'https://www.banregio.com/divisas.php',
           ...(cookies && { 'Cookie': cookies.join('; ') })
-        }
-      },
-      
-      // Variación 3: GET con parámetros (por si usa GET en lugar de POST)
-      {
-        method: 'GET',
-        data: {
-          tipo,
-          moneda,
-          cantidad,
-          t: Date.now() // Timestamp para evitar cache
-        }
+        },
+        timeout: 15000,
+        validateStatus: (status) => status >= 200 && status < 500
       }
-    ];
+    );
     
-    // Probar cada variación
-    for (let i = 0; i < requestVariations.length; i++) {
-      const variation = requestVariations[i];
+    console.log('📡 Respuesta POST:', response.status, 'Tamaño:', response.data?.length || 0);
+    
+    // Analizar respuesta
+    if (typeof response.data === 'string') {
+      const $response = cheerio.load(response.data);
       
-      try {
-        console.log(`🔄 Probando variación ${i + 1}/${requestVariations.length}`);
+      // Buscar específicamente el input #mxn en la respuesta
+      const mxnInput = $response('#mxn');
+      
+      if (mxnInput.length > 0) {
+        const mxnValue = mxnInput.val() || mxnInput.attr('value');
         
-        let response;
-        const url = 'https://www.banregio.com/divisas.php';
-        
-        if (variation.method === 'GET') {
-          const params = new URLSearchParams(variation.data).toString();
-          response = await axios.get(`${url}?${params}`, {
-            headers: variation.headers || headers,
-            timeout: 15000,
-            validateStatus: (status) => status >= 200 && status < 500
-          });
-        } else {
-          const requestData = new URLSearchParams(variation.data).toString();
-          response = await axios.post(url, requestData, {
-            headers: variation.headers || headers,
-            timeout: 15000,
-            validateStatus: (status) => status >= 200 && status < 500
-          });
-        }
-        
-        console.log(`📡 Respuesta variación ${i + 1}:`, response.status, 'Tamaño:', response.data?.length || 0);
-        
-        // Analizar respuesta JSON
-        if (response.data && typeof response.data === 'object') {
-          const possibleMxnKeys = ['mxn', 'resultado', 'total', 'amount', 'value', 'converted'];
+        if (mxnValue && /^\d+\.?\d*$/.test(mxnValue.replace(/[,$]/g, ''))) {
+          const numValue = parseFloat(mxnValue.replace(/[,$]/g, ''));
           
-          for (const key of possibleMxnKeys) {
-            if (response.data[key] && !isNaN(parseFloat(response.data[key]))) {
-              const mxnValue = parseFloat(response.data[key]);
-              if (mxnValue > cantidad * 15 && mxnValue < cantidad * 25) {
-                return {
-                  endpoint: 'divisas.php',
-                  method: variation.method,
-                  variation: i + 1,
-                  data: { mxn: mxnValue, raw: response.data[key], key },
-                  success: true
-                };
-              }
-            }
-          }
-        }
-        
-        // Analizar respuesta HTML con mejor precisión
-        if (typeof response.data === 'string') {
-          const $response = cheerio.load(response.data);
-          
-          // Buscar específicamente el input MXN con valor actualizado
-          const mxnSelectors = [
-            'input#mxn[value]',
-            'input[name="mxn"][value]',
-            '.mxn-result',
-            '[data-result]',
-            'input[type="text"][readonly]'
-          ];
-          
-          for (const selector of mxnSelectors) {
-            const element = $response(selector);
-            if (element.length > 0) {
-              const value = element.val() || element.attr('value') || element.text();
-              if (value && /^\d+\.?\d*$/.test(value.replace(/[,$\s]/g, ''))) {
-                const numValue = parseFloat(value.replace(/[,$\s]/g, ''));
-                
-                // Validar que el resultado esté en un rango razonable
-                const expectedMin = cantidad * 17; // Tasa mínima esperada ~17
-                const expectedMax = cantidad * 22; // Tasa máxima esperada ~22
-                
-                if (numValue >= expectedMin && numValue <= expectedMax) {
-                  console.log(`✅ Valor MXN preciso encontrado: ${numValue} (selector: ${selector})`);
-                  return {
-                    endpoint: 'divisas.php',
-                    method: variation.method,
-                    variation: i + 1,
-                    data: { mxn: numValue, raw: value, selector },
-                    success: true
-                  };
-                }
-              }
-            }
-          }
-          
-          // Búsqueda más agresiva: Encontrar números que estén cerca del valor esperado
-          const allNumbers = response.data.match(/\b\d{4,5}\.?\d{0,2}\b/g) || [];
-          const expectedValue = cantidad * 19.4; // Aproximado según la imagen
-          
-          const closestNumber = allNumbers
-            .map(n => parseFloat(n.replace(/[,$]/g, '')))
-            .filter(n => n >= cantidad * 17 && n <= cantidad * 22)
-            .sort((a, b) => Math.abs(a - expectedValue) - Math.abs(b - expectedValue))[0];
-          
-          if (closestNumber) {
-            console.log(`✅ Número más cercano al esperado: ${closestNumber}`);
+          // Validar que sea un valor razonable
+          if (numValue > cantidad * 15 && numValue < cantidad * 25) {
+            console.log(`✅ Valor MXN extraído del input #mxn: ${numValue}`);
+            
             return {
-              endpoint: 'divisas.php',
-              method: variation.method,
-              variation: i + 1,
-              data: { mxn: closestNumber, raw: closestNumber.toString(), source: 'closest-match' },
-              success: true
+              mxn: parseFloat(numValue.toFixed(2)),
+              tipoCambio: parseFloat((numValue / cantidad).toFixed(4)),
+              tipo,
+              moneda,
+              cantidad,
+              fuente: 'banregio-form-simulation',
+              timestamp: new Date().toISOString(),
+              detalles: {
+                selector: '#mxn',
+                rawValue: mxnValue,
+                method: 'form-post-simulation',
+                formData: Object.keys(calculatorData)
+              }
             };
           }
         }
-        
-      } catch (variationError) {
-        console.log(`❌ Error en variación ${i + 1}:`, variationError.message);
-        continue;
       }
+      
+      // Fallback: buscar cualquier input form-control text-right que pueda ser el resultado
+      const resultInputs = $response('input.form-control.text-right');
+      console.log(`🔍 Inputs con clase form-control text-right: ${resultInputs.length}`);
+      
+      resultInputs.each((i, input) => {
+        const $input = $response(input);
+        const id = $input.attr('id');
+        const value = $input.val() || $input.attr('value');
+        
+        console.log(`  - Input ${i + 1}: id="${id}", value="${value}"`);
+        
+        if (id === 'mxn' && value) {
+          const numValue = parseFloat(value.replace(/[,$]/g, ''));
+          if (!isNaN(numValue) && numValue > 0) {
+            console.log(`✅ Encontrado input MXN por ID: ${numValue}`);
+            // Ya procesado arriba
+          }
+        }
+      });
     }
     
-    throw new Error('No se pudo obtener el valor MXN correcto de la calculadora');
+    throw new Error('No se pudo extraer valor MXN de la simulación del formulario');
     
   } catch (error) {
-    console.error('❌ Error en simulación AJAX mejorada:', error.message);
+    console.error('❌ Error en simulación con elementos específicos:', error.message);
     throw error;
   }
 }
@@ -662,48 +691,54 @@ function getFallbackRates() {
   };
 }
 
-// ✅ FUNCIÓN PRINCIPAL DE CONVERSIÓN
+// ✅ FUNCIÓN PRINCIPAL DE CONVERSIÓN (ACTUALIZADA)
 async function convertirDivisa({ tipo = 'comprar', moneda = 'USD', cantidad = 300 }) {
   try {
-    console.log(`🔄 Convirtiendo: ${tipo} ${cantidad} ${moneda}`);
+    console.log(`🔄 Convirtiendo con elementos específicos: ${tipo} ${cantidad} ${moneda}`);
     
     const cacheKey = `conversion-${tipo}-${moneda}-${cantidad}`;
     let resultado = getCached(cacheKey);
     
     if (!resultado) {
-      console.log('📡 Obteniendo conversión fresca...');
+      console.log('📡 Obteniendo conversión fresca con elementos específicos...');
       
-      // Intentar método 1: Simulación AJAX
+      // Método 1: Extracción específica usando los elementos identificados
       try {
-        console.log('🎯 Intentando simulación AJAX...');
-        const ajaxResult = await simularCalculadoraAjax({ tipo, moneda, cantidad });
+        console.log('🎯 Intentando extracción con elementos específicos...');
+        resultado = await extraerValorMXNEspecifico({ tipo, moneda, cantidad });
         
-        if (ajaxResult.success && ajaxResult.data.mxn) {
-          const mxnValue = parseFloat(ajaxResult.data.mxn);
-          const tipoCambio = mxnValue / cantidad;
-          
-          resultado = {
-            mxn: parseFloat(mxnValue.toFixed(2)),
-            tipoCambio: parseFloat(tipoCambio.toFixed(4)),
-            tipo,
-            moneda,
-            cantidad,
-            fuente: 'banregio-ajax',
-            timestamp: new Date().toISOString(),
-            detalles: {
-              endpoint: ajaxResult.endpoint,
-              rawData: ajaxResult.data,
-              fuenteDatos: 'ajax-simulation'
-            }
-          };
+        if (resultado) {
+          console.log('✅ Éxito con elementos específicos');
+          setCache(cacheKey, resultado);
+          return resultado;
+        }
+      } catch (specificError) {
+        console.log('⚠️ Extracción específica falló:', specificError.message);
+      }
+      
+      // Método 2: Simulación AJAX mejorada (mantener como fallback)
+      try {
+        console.log('🎯 Intentando simulación AJAX como fallback...');
+        const ajaxResult = await simularCalculadoraConElementosEspecificos({ 
+          tipo, 
+          moneda, 
+          cantidad,
+          pageHtml: null, // Se obtendrá internamente
+          cookies: null
+        });
+        
+        if (ajaxResult) {
+          console.log('✅ Éxito con simulación AJAX');
+          setCache(cacheKey, ajaxResult);
+          return ajaxResult;
         }
       } catch (ajaxError) {
         console.log('⚠️ Simulación AJAX falló:', ajaxError.message);
       }
       
-      // Método 2: Lógica reversa si AJAX no funcionó
+      // Método 3: Lógica reversa mejorada
       if (!resultado) {
-        console.log('🧮 Usando lógica reversa...');
+        console.log('🧮 Usando lógica reversa mejorada como último recurso...');
         resultado = await calcularConLogicaReversa({ tipo, moneda, cantidad });
       }
       
@@ -864,25 +899,47 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
     const { tipo, moneda, cantidad } = req.params;
     console.log(`🐛 Debug mode para: ${tipo} ${cantidad} ${moneda}`);
     
-    // Ejecutar ambos métodos y recolectar información detallada
+    // Ejecutar todos los métodos y recolectar información detallada
     const debugInfo = {
       params: { tipo, moneda, cantidad: parseFloat(cantidad) },
       timestamp: new Date().toISOString(),
-      ajax: null,
+      specificExtraction: null,
+      ajaxSimulation: null,
       reverseLogic: null,
       htmlAnalysis: null
     };
     
+    // Probar extracción específica
+    try {
+      debugInfo.specificExtraction = await extraerValorMXNEspecifico({ 
+        tipo, 
+        moneda, 
+        cantidad: parseFloat(cantidad) 
+      });
+    } catch (specificError) {
+      debugInfo.specificExtraction = { error: specificError.message };
+    }
+    
     // Probar simulación AJAX
     try {
-      debugInfo.ajax = await simularCalculadoraAjax({ tipo, moneda, cantidad: parseFloat(cantidad) });
+      debugInfo.ajaxSimulation = await simularCalculadoraConElementosEspecificos({ 
+        tipo, 
+        moneda, 
+        cantidad: parseFloat(cantidad),
+        pageHtml: null,
+        cookies: null
+      });
     } catch (ajaxError) {
-      debugInfo.ajax = { error: ajaxError.message };
+      debugInfo.ajaxSimulation = { error: ajaxError.message };
     }
     
     // Probar lógica reversa
     try {
-      debugInfo.reverseLogic = await calcularConLogicaReversa({ tipo, moneda, cantidad: parseFloat(cantidad) });
+      debugInfo.reverseLogic = await calcularConLogicaReversa({ 
+        tipo, 
+        moneda, 
+        cantidad: parseFloat(cantidad) 
+      });
     } catch (reverseError) {
       debugInfo.reverseLogic = { error: reverseError.message };
     }
@@ -896,7 +953,15 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
     
     res.json({
       success: true,
-      data: debugInfo
+      data: debugInfo,
+      summary: {
+        specificExtractionWorked: !debugInfo.specificExtraction?.error,
+        ajaxSimulationWorked: !debugInfo.ajaxSimulation?.error,
+        reverseLogicWorked: !debugInfo.reverseLogic?.error,
+        recommendedMethod: debugInfo.specificExtraction?.error ? 
+          (debugInfo.ajaxSimulation?.error ? 'reverseLogic' : 'ajaxSimulation') : 
+          'specificExtraction'
+      }
     });
     
   } catch (error) {
@@ -952,17 +1017,23 @@ app.get('/api/currencies', (req, res) => {
 // Info de la API
 app.get('/api/info', (req, res) => {
   res.json({
-    service: 'Banregio Currency API (Enhanced Ajax + Reverse Logic)',
-    version: '2.1',
-    descripcion: 'API mejorada para conversión de divisas desde Banregio con debugging avanzado',
+    service: 'Banregio Currency API (Specific Elements Extraction)',
+    version: '3.0',
+    descripcion: 'API especializada para conversión de divisas usando elementos específicos identificados (#divisa, #mxn, .custom-select)',
     target: 'https://www.banregio.com/divisas.php',
-    methods: ['Enhanced Ajax Simulation', 'Advanced Reverse Logic', 'Fallback Rates'],
+    methods: [
+      'Specific Elements Extraction (Primary)',
+      'Form Simulation with Specific Selectors', 
+      'Advanced Reverse Logic (Fallback)',
+      'Updated Fallback Rates'
+    ],
     features: [
-      'Múltiples estrategias de extracción',
-      'Análisis profundo del HTML',
-      'Debug detallado',
-      'Cache inteligente',
-      'Simulación AJAX avanzada'
+      'Extracción directa del input #mxn',
+      'Simulación exacta del formulario con selectores específicos',
+      'Identificación de elementos .py-5.text-center para tipo',
+      'Uso del select .custom-select para moneda',
+      'Análisis JavaScript de calculadora',
+      'Debug detallado con 3 métodos'
     ],
     endpoints: [
       'GET  /api/health',
@@ -1007,10 +1078,12 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 API Banregio (Ajax + Reverse Logic) iniciada en puerto ${PORT}`);
+  console.log(`🚀 API Banregio (Specific Elements) iniciada en puerto ${PORT}`);
   console.log(`🎯 Target: https://www.banregio.com/divisas.php`);
-  console.log(`💡 Modo: Ajax Simulation + Reverse Logic + Fallback`);
+  console.log(`💡 Modo: Specific Elements (#divisa, #mxn, .custom-select) + Fallbacks`);
+  console.log(`🔧 Elementos: Input #divisa, Input #mxn, Select .custom-select`);
   console.log(`📋 Info: http://localhost:${PORT}/api/info`);
+  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug/comprar/USD/300`);
 });
 
 // Graceful shutdown
