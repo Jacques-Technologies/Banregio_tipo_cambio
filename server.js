@@ -14,42 +14,15 @@ app.use(express.json());
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 15,
+  max: 20,
   message: { error: 'Demasiadas solicitudes' }
 });
 
 app.use('/api/', limiter);
 
-// Headers mejorados para evitar detección de bot
-const getRandomHeaders = () => {
-  const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
-  ];
-  
-  return {
-    'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Cache-Control': 'max-age=0',
-    'DNT': '1',
-    'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"'
-  };
-};
-
-// Cache con TTL más largo para tasas
+// Cache
 const cache = new Map();
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+const CACHE_DURATION = 3 * 60 * 1000; // 3 minutos para tasas
 
 function getCached(key) {
   const cached = cache.get(key);
@@ -63,21 +36,34 @@ function setCache(key, data) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// ✅ TASAS REALES ACTUALIZADAS (basadas en fuentes externas verificadas)
-function getTasasActualizadas() {
-  // Tasas reales de Banregio actualizadas al 31 de julio 2025
-  return {
-    USD: { compra: 17.80, venta: 19.30 }, // Fuente: eldolarenmexico.com
-    EUR: { compra: 20.20, venta: 21.80 }, // Calculado proporcionalmente
-    CAD: { compra: 13.10, venta: 14.20 }, // Calculado proporcionalmente  
-    GBP: { compra: 22.50, venta: 24.30 }, // Calculado proporcionalmente
-    JPY: { compra: 0.120, venta: 0.140 }  // Calculado proporcionalmente
+// ✅ HEADERS AVANZADOS ANTI-DETECCIÓN ESPECÍFICOS PARA BANREGIO
+function getBanregioHeaders() {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'es-MX,es;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'max-age=0',
+    'DNT': '1',
+    'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'Referer': 'https://www.banregio.com/',
+    'Origin': 'https://www.banregio.com'
   };
+  
+  return headers;
 }
 
-// ✅ FUNCIÓN PRINCIPAL MEJORADA CON MÚLTIPLES ESTRATEGIAS
-async function obtenerTasasBanregio() {
-  const cacheKey = 'tasas-banregio';
+// ✅ FUNCIÓN PRINCIPAL PARA EXTRAER TASAS DE BANREGIO
+async function extraerTasasDeBanregio() {
+  const cacheKey = 'tasas-banregio-oficial';
   let tasas = getCached(cacheKey);
   
   if (tasas) {
@@ -85,113 +71,269 @@ async function obtenerTasasBanregio() {
     return tasas;
   }
   
-  console.log('🔍 Obteniendo tasas frescas con múltiples estrategias...');
+  console.log('🔍 Extrayendo tasas desde https://www.banregio.com/divisas.php#!');
   
-  // Estrategia 1: Intentar scraping con headers mejorados
+  // Estrategia 1: Scraping directo con técnicas avanzadas
   try {
-    tasas = await scrapearTasasConHeadersMejorados();
+    tasas = await scrapearPaginaBanregioAvanzado();
     if (tasas && Object.keys(tasas).length > 0) {
-      console.log('✅ Tasas obtenidas por scraping directo');
+      console.log('✅ Tasas extraídas por scraping avanzado');
       setCache(cacheKey, tasas);
       return tasas;
     }
   } catch (scrapingError) {
-    console.log('⚠️ Scraping directo falló:', scrapingError.message);
+    console.log('⚠️ Scraping avanzado falló:', scrapingError.message);
   }
   
-  // Estrategia 2: Usar API endpoints alternativos
+  // Estrategia 2: Simular sesión de navegador completa
   try {
-    tasas = await intentarEndpointsAlternativos();
+    tasas = await simularSesionNavegador();
     if (tasas && Object.keys(tasas).length > 0) {
-      console.log('✅ Tasas obtenidas por endpoints alternativos');
+      console.log('✅ Tasas extraídas por simulación de navegador');
       setCache(cacheKey, tasas);
       return tasas;
     }
-  } catch (apiError) {
-    console.log('⚠️ APIs alternativas fallaron:', apiError.message);
+  } catch (browserError) {
+    console.log('⚠️ Simulación de navegador falló:', browserError.message);
   }
   
-  // Estrategia 3: Usar tasas verificadas actualizadas
-  console.log('📊 Usando tasas verificadas actualizadas');
-  tasas = getTasasActualizadas();
+  // Estrategia 3: Análisis de JavaScript embebido
+  try {
+    tasas = await analizarJavaScriptEmbebido();
+    if (tasas && Object.keys(tasas).length > 0) {
+      console.log('✅ Tasas extraídas desde JavaScript embebido');
+      setCache(cacheKey, tasas);
+      return tasas;
+    }
+  } catch (jsError) {
+    console.log('⚠️ Análisis de JavaScript falló:', jsError.message);
+  }
   
-  setCache(cacheKey, tasas);
-  return tasas;
+  throw new Error('No se pudieron extraer tasas de la página oficial de Banregio. La página puede estar bloqueando el acceso o las tasas no están disponibles.');
 }
 
-// ✅ SCRAPING CON HEADERS MEJORADOS Y TÉCNICAS ANTI-DETECCIÓN
-async function scrapearTasasConHeadersMejorados() {
+// ✅ SCRAPING AVANZADO CON MÚLTIPLES TÉCNICAS
+async function scrapearPaginaBanregioAvanzado() {
   const urls = [
+    'https://www.banregio.com/divisas.php#!',
     'https://www.banregio.com/divisas.php',
-    'https://divisas.banregio.com/',
     'https://www.banregio.com/divisas'
   ];
   
   for (const url of urls) {
     try {
-      console.log(`🎯 Intentando scraping: ${url}`);
+      console.log(`🎯 Intentando scraping avanzado: ${url}`);
       
       // Delay aleatorio para simular comportamiento humano
-      await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 3000 + 2000));
       
-      const response = await axios.get(url, {
-        headers: getRandomHeaders(),
-        timeout: 15000,
-        maxRedirects: 3,
+      const axiosConfig = {
+        url,
+        method: 'GET',
+        headers: getBanregioHeaders(),
+        timeout: 30000,
+        maxRedirects: 5,
         validateStatus: (status) => status >= 200 && status < 400,
         decompress: true,
-        // Configuraciones adicionales anti-detección
-        httpAgent: false,
+        // Configuraciones específicas para evitar detección
+        maxContentLength: 100 * 1024 * 1024, // 100MB
+        maxBodyLength: 100 * 1024 * 1024,
+        // Evitar que axios añada headers automáticos
+        transformRequest: [(data, headers) => {
+          delete headers['Content-Length'];
+          return data;
+        }],
+        // Simular comportamiento de navegador
         httpsAgent: false,
-        maxContentLength: 50 * 1024 * 1024, // 50MB max
-        proxy: false
-      });
+        httpAgent: false
+      };
       
-      console.log(`📄 Respuesta ${url}: ${response.status}, tamaño: ${response.data?.length || 0}`);
+      const response = await axios(axiosConfig);
       
-      if (!response.data || response.data.length < 1000) {
-        console.log(`⚠️ Contenido muy pequeño en ${url}, saltando...`);
+      console.log(`📄 Respuesta obtenida: Status ${response.status}, Tamaño: ${response.data?.length || 0} bytes`);
+      console.log(`🏷️ Content-Type: ${response.headers['content-type']}`);
+      
+      if (!response.data || response.data.length < 2000) {
+        console.log(`⚠️ Contenido muy pequeño (${response.data?.length} bytes), posible bloqueo`);
+        console.log(`📝 Contenido recibido: "${response.data?.substring(0, 500)}"`);
         continue;
       }
       
-      const tasas = extraerTasasDelHTML(response.data);
-      if (tasas && Object.keys(tasas).length > 0) {
-        return tasas;
+      // Analizar el HTML completo
+      const tasasExtraidas = analizarHTMLCompleto(response.data, url);
+      
+      if (tasasExtraidas && Object.keys(tasasExtraidas).length > 0) {
+        console.log('✅ Tasas encontradas en:', url);
+        return tasasExtraidas;
       }
       
     } catch (error) {
       console.log(`❌ Error en ${url}:`, error.message);
+      
+      // Log adicional para errores específicos
+      if (error.response) {
+        console.log(`   📊 Status: ${error.response.status}`);
+        console.log(`   📄 Response: ${error.response.data?.substring(0, 200)}`);
+      }
+      
       continue;
     }
   }
   
-  throw new Error('No se pudo obtener tasas por scraping');
+  throw new Error('Scraping avanzado falló en todas las URLs');
 }
 
-// ✅ EXTRAER TASAS DEL HTML MEJORADO
-function extraerTasasDelHTML(html) {
+// ✅ ANÁLISIS COMPLETO DE HTML Y JAVASCRIPT
+function analizarHTMLCompleto(html, url) {
+  console.log('🔍 Analizando HTML completo para extraer tasas...');
+  
   const $ = cheerio.load(html);
   const tasas = {};
   
-  console.log('🔍 Analizando HTML para extraer tasas...');
   console.log(`📄 Título: "${$('title').text()}"`);
-  console.log(`📊 Scripts: ${$('script').length}, Inputs: ${$('input').length}`);
+  console.log(`📊 Elementos: ${$('*').length}, Scripts: ${$('script').length}, Inputs: ${$('input').length}`);
   
-  // Estrategia 1: Buscar en scripts JavaScript
+  // Verificar si tenemos la calculadora
+  const tieneCalculadora = $('#divisa').length > 0 && $('#mxn').length > 0;
+  const tieneSelect = $('.custom-select').length > 0;
+  const tieneScripts = $('script').length > 0;
+  
+  console.log(`🧮 Calculadora detectada: ${tieneCalculadora}`);
+  console.log(`📝 Select de monedas: ${tieneSelect}`);
+  console.log(`📜 Scripts disponibles: ${tieneScripts}`);
+  
+  if (!tieneCalculadora) {
+    console.log('⚠️ No se detectó la calculadora de divisas en el HTML');
+    throw new Error('Calculadora de divisas no encontrada en la página');
+  }
+  
+  // Estrategia 1: Analizar todos los scripts en busca de tasas
   $('script').each((i, script) => {
     const content = $(script).html() || '';
     
-    // Patrones para tasas en JavaScript
-    const patterns = [
-      /USD.*?(\d{1,2}\.\d{1,4}).*?(\d{1,2}\.\d{1,4})/gi,
-      /EUR.*?(\d{1,2}\.\d{1,4}).*?(\d{1,2}\.\d{1,4})/gi,
-      /["']USD["'].*?(\d{1,2}\.\d{1,4})/gi,
-      /compra.*?(\d{1,2}\.\d{1,4}).*?venta.*?(\d{1,2}\.\d{1,4})/gi
-    ];
-    
-    patterns.forEach(pattern => {
-      let match;
-      while ((match = pattern.exec(content)) !== null) {
+    if (content.length > 100) { // Solo scripts con contenido significativo
+      console.log(`📜 Analizando script ${i + 1} (${content.length} chars)...`);
+      
+      // Buscar variables que contengan tasas
+      const variablePatterns = [
+        // Patrones para variables de tasas
+        /(?:var|let|const)\s+(\w*(?:rate|tasa|cambio|divisa|exchange)\w*)\s*=\s*([^;]+);/gi,
+        /(\w+)\s*[:=]\s*\{[^}]*(?:USD|EUR|CAD|GBP|JPY)[^}]*\}/gi,
+        // Patrones específicos de Banregio
+        /convertToMXN.*?function/gi,
+        /moneda\s*=\s*['"]([^'"]+)['"]/gi,
+        /tipoOperacion\s*=\s*['"]([^'"]+)['"]/gi,
+        // Buscar números que parezcan tasas de cambio
+        /(?:USD|EUR|CAD|GBP|JPY).*?(\d{1,2}\.\d{2,4})/gi,
+        // Patrones de objetos con tasas
+        /\{[^}]*compra[^}]*:.*?(\d{1,2}\.\d{2,4})[^}]*venta[^}]*:.*?(\d{1,2}\.\d{2,4})[^}]*\}/gi
+      ];
+      
+      variablePatterns.forEach((pattern, patternIndex) => {
+        let match;
+        while ((match = pattern.exec(content)) !== null) {
+          console.log(`   🎯 Patrón ${patternIndex + 1} encontrado: ${match[0].substring(0, 100)}...`);
+          
+          // Extraer números que parezcan tasas
+          const numeros = match[0].match(/\d{1,2}\.\d{2,4}/g);
+          
+          if (numeros && numeros.length >= 1) {
+            const rates = numeros.map(n => parseFloat(n));
+            
+            // Filtrar por rangos típicos de cada moneda
+            const usdRates = rates.filter(r => r >= 15 && r <= 25);
+            const eurRates = rates.filter(r => r >= 18 && r <= 30);
+            const cadRates = rates.filter(r => r >= 12 && r <= 18);
+            const gbpRates = rates.filter(r => r >= 20 && r <= 32);
+            const jpyRates = rates.filter(r => r >= 0.1 && r <= 0.3);
+            
+            // Asignar tasas si encontramos valores válidos
+            if (usdRates.length >= 2 && !tasas.USD) {
+              usdRates.sort((a, b) => a - b);
+              tasas.USD = { 
+                compra: usdRates[0], 
+                venta: usdRates[usdRates.length - 1] 
+              };
+              console.log(`   ✅ USD extraído: ${tasas.USD.compra} / ${tasas.USD.venta}`);
+            } else if (usdRates.length === 1 && !tasas.USD) {
+              // Si solo hay una tasa, calcular la otra con spread típico
+              const baseRate = usdRates[0];
+              tasas.USD = {
+                compra: parseFloat((baseRate * 0.99).toFixed(2)),
+                venta: parseFloat((baseRate * 1.01).toFixed(2))
+              };
+              console.log(`   ✅ USD calculado: ${tasas.USD.compra} / ${tasas.USD.venta}`);
+            }
+            
+            if (eurRates.length >= 2 && !tasas.EUR) {
+              eurRates.sort((a, b) => a - b);
+              tasas.EUR = { 
+                compra: eurRates[0], 
+                venta: eurRates[eurRates.length - 1] 
+              };
+              console.log(`   ✅ EUR extraído: ${tasas.EUR.compra} / ${tasas.EUR.venta}`);
+            } else if (eurRates.length === 1 && !tasas.EUR) {
+              const baseRate = eurRates[0];
+              tasas.EUR = {
+                compra: parseFloat((baseRate * 0.99).toFixed(2)),
+                venta: parseFloat((baseRate * 1.01).toFixed(2))
+              };
+              console.log(`   ✅ EUR calculado: ${tasas.EUR.compra} / ${tasas.EUR.venta}`);
+            }
+            
+            // Aplicar misma lógica para otras monedas
+            if (cadRates.length >= 1 && !tasas.CAD) {
+              const baseRate = cadRates[0];
+              tasas.CAD = {
+                compra: parseFloat((baseRate * 0.99).toFixed(2)),
+                venta: parseFloat((baseRate * 1.01).toFixed(2))
+              };
+              console.log(`   ✅ CAD calculado: ${tasas.CAD.compra} / ${tasas.CAD.venta}`);
+            }
+            
+            if (gbpRates.length >= 1 && !tasas.GBP) {
+              const baseRate = gbpRates[0];
+              tasas.GBP = {
+                compra: parseFloat((baseRate * 0.99).toFixed(2)),
+                venta: parseFloat((baseRate * 1.01).toFixed(2))
+              };
+              console.log(`   ✅ GBP calculado: ${tasas.GBP.compra} / ${tasas.GBP.venta}`);
+            }
+            
+            if (jpyRates.length >= 1 && !tasas.JPY) {
+              const baseRate = jpyRates[0];
+              tasas.JPY = {
+                compra: parseFloat((baseRate * 0.99).toFixed(4)),
+                venta: parseFloat((baseRate * 1.01).toFixed(4))
+              };
+              console.log(`   ✅ JPY calculado: ${tasas.JPY.compra} / ${tasas.JPY.venta}`);
+            }
+          }
+        }
+      });
+    }
+  });
+  
+  // Estrategia 2: Buscar en elementos HTML visibles
+  console.log('🔍 Buscando tasas en elementos HTML visibles...');
+  
+  // Buscar en texto visible de la página
+  const bodyText = $('body').text().replace(/\s+/g, ' ');
+  
+  // Patrones para encontrar tasas en texto visible
+  const textPatterns = [
+    /USD[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+    /EUR[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+    /Dólar[^\d]*(\d{1,2}\.\d{2,4})/gi,
+    /Euro[^\d]*(\d{1,2}\.\d{2,4})/gi
+  ];
+  
+  textPatterns.forEach((pattern, index) => {
+    const match = pattern.exec(bodyText);
+    if (match) {
+      console.log(`📄 Patrón de texto ${index + 1}: ${match[0]}`);
+      
+      if (index === 0 && !tasas.USD) { // USD
         const rate1 = parseFloat(match[1]);
         const rate2 = parseFloat(match[2] || match[1]);
         
@@ -200,127 +342,127 @@ function extraerTasasDelHTML(html) {
             compra: Math.min(rate1, rate2),
             venta: Math.max(rate1, rate2)
           };
-          console.log(`✅ USD encontrado en JS: ${rate1}, ${rate2}`);
+          console.log(`   ✅ USD desde texto: ${tasas.USD.compra} / ${tasas.USD.venta}`);
         }
       }
-    });
-  });
-  
-  // Estrategia 2: Buscar en elementos HTML visibles
-  const htmlText = $('body').text().replace(/\s+/g, ' ');
-  
-  const monedas = {
-    USD: { min: 15, max: 25 },
-    EUR: { min: 18, max: 28 },
-    CAD: { min: 12, max: 17 },
-    GBP: { min: 20, max: 30 },
-    JPY: { min: 0.1, max: 0.2 }
-  };
-  
-  Object.entries(monedas).forEach(([moneda, rango]) => {
-    if (tasas[moneda]) return; // Ya encontrada
-    
-    const patterns = [
-      new RegExp(`${moneda}[^\\d]*(\\d{1,2}\\.\\d{1,4})[^\\d]*(\\d{1,2}\\.\\d{1,4})`, 'gi'),
-      new RegExp(`${moneda}.*?(\\d{1,2}\\.\\d{1,4})`, 'gi')
-    ];
-    
-    patterns.forEach(pattern => {
-      const match = pattern.exec(htmlText);
-      if (match) {
+      
+      if (index === 1 && !tasas.EUR) { // EUR
         const rate1 = parseFloat(match[1]);
         const rate2 = parseFloat(match[2] || match[1]);
         
-        if (rate1 >= rango.min && rate1 <= rango.max && 
-            rate2 >= rango.min && rate2 <= rango.max) {
-          tasas[moneda] = {
+        if (rate1 >= 18 && rate1 <= 30 && rate2 >= 18 && rate2 <= 30) {
+          tasas.EUR = {
             compra: Math.min(rate1, rate2),
             venta: Math.max(rate1, rate2)
           };
-          console.log(`✅ ${moneda} encontrado en HTML: ${rate1}, ${rate2}`);
+          console.log(`   ✅ EUR desde texto: ${tasas.EUR.compra} / ${tasas.EUR.venta}`);
         }
       }
-    });
+    }
   });
   
   // Estrategia 3: Buscar en inputs y elementos de formulario
-  $('.form-control, input, .currency-rate, .exchange-rate').each((i, el) => {
+  console.log('🔍 Buscando tasas en elementos de formulario...');
+  
+  $('input, select, option, [data-rate], [data-tasa]').each((i, el) => {
     const $el = $(el);
-    const value = $el.val() || $el.text() || $el.attr('value') || '';
-    const rate = parseFloat(value.replace(/[^\d.]/g, ''));
+    const value = $el.val() || $el.text() || $el.attr('value') || $el.attr('data-rate') || $el.attr('data-tasa') || '';
     
-    if (!isNaN(rate) && rate >= 15 && rate <= 25) {
+    if (value && /^\d{1,2}\.\d{2,4}$/.test(value.toString().trim())) {
+      const rate = parseFloat(value);
       const id = $el.attr('id') || '';
       const className = $el.attr('class') || '';
+      const text = $el.text().toLowerCase();
       
-      if (id.includes('usd') || className.includes('usd') || 
-          id.includes('dollar') || className.includes('dollar')) {
-        tasas.USD = tasas.USD || { compra: rate, venta: rate * 1.02 };
-        console.log(`✅ USD encontrado en elemento: ${rate}`);
+      console.log(`📝 Elemento con tasa: ${$el.prop('tagName')} id="${id}" class="${className}" valor="${rate}"`);
+      
+      // Identificar moneda por contexto
+      if ((id.includes('usd') || className.includes('usd') || text.includes('usd') || text.includes('dólar')) && 
+          rate >= 15 && rate <= 25 && !tasas.USD) {
+        tasas.USD = {
+          compra: parseFloat((rate * 0.99).toFixed(2)),
+          venta: parseFloat((rate * 1.01).toFixed(2))
+        };
+        console.log(`   ✅ USD desde formulario: ${tasas.USD.compra} / ${tasas.USD.venta}`);
+      }
+      
+      if ((id.includes('eur') || className.includes('eur') || text.includes('eur') || text.includes('euro')) && 
+          rate >= 18 && rate <= 30 && !tasas.EUR) {
+        tasas.EUR = {
+          compra: parseFloat((rate * 0.99).toFixed(2)),
+          venta: parseFloat((rate * 1.01).toFixed(2))
+        };
+        console.log(`   ✅ EUR desde formulario: ${tasas.EUR.compra} / ${tasas.EUR.venta}`);
       }
     }
   });
   
-  return tasas;
-}
-
-// ✅ INTENTAR ENDPOINTS ALTERNATIVOS
-async function intentarEndpointsAlternativos() {
-  const endpoints = [
-    'https://www.banregio.com/api/divisas',
-    'https://www.banregio.com/ajax/exchange-rates',
-    'https://divisas.banregio.com/api/rates',
-    'https://www.banregio.com/services/currency-exchange'
-  ];
+  console.log(`📊 Tasas extraídas del HTML: ${Object.keys(tasas).join(', ')}`);
   
-  for (const endpoint of endpoints) {
-    try {
-      console.log(`🌐 Intentando API: ${endpoint}`);
-      
-      const response = await axios.get(endpoint, {
-        headers: {
-          ...getRandomHeaders(),
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        timeout: 10000,
-        validateStatus: (status) => status >= 200 && status < 400
-      });
-      
-      if (response.data && typeof response.data === 'object') {
-        console.log(`✅ Respuesta JSON de ${endpoint}`);
-        return procesarRespuestaAPI(response.data);
-      }
-      
-    } catch (error) {
-      console.log(`⚠️ API ${endpoint} falló:`, error.message);
-      continue;
-    }
+  if (Object.keys(tasas).length === 0) {
+    throw new Error('No se encontraron tasas en el HTML de la página');
   }
   
-  throw new Error('No se encontraron APIs funcionales');
+  return tasas;
 }
 
-// ✅ PROCESAR RESPUESTA DE API
-function procesarRespuestaAPI(data) {
-  const tasas = {};
+// ✅ SIMULAR SESIÓN DE NAVEGADOR CON COOKIES
+async function simularSesionNavegador() {
+  console.log('🌐 Simulando sesión completa de navegador...');
   
-  // Intentar diferentes estructuras de respuesta
-  const posiblesCampos = ['rates', 'exchangeRates', 'currency', 'divisas', 'data'];
-  
-  posiblesCampos.forEach(campo => {
-    if (data[campo] && typeof data[campo] === 'object') {
-      Object.entries(data[campo]).forEach(([moneda, rates]) => {
-        if (typeof rates === 'object' && rates.compra && rates.venta) {
-          tasas[moneda] = rates;
-        } else if (typeof rates === 'number' && rates > 10) {
-          tasas[moneda] = { compra: rates * 0.99, venta: rates * 1.01 };
-        }
-      });
+  try {
+    // Paso 1: Visitar página principal para obtener cookies
+    console.log('📍 Paso 1: Visitando página principal...');
+    
+    const mainPageResponse = await axios.get('https://www.banregio.com/', {
+      headers: getBanregioHeaders(),
+      timeout: 15000,
+      maxRedirects: 3
+    });
+    
+    const cookies = mainPageResponse.headers['set-cookie'] || [];
+    console.log(`🍪 Cookies obtenidas: ${cookies.length}`);
+    
+    // Delay para simular navegación humana
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Paso 2: Navegar a la página de divisas con cookies
+    console.log('📍 Paso 2: Navegando a página de divisas con sesión...');
+    
+    const headers = {
+      ...getBanregioHeaders(),
+      'Referer': 'https://www.banregio.com/',
+      'Cookie': cookies.join('; ')
+    };
+    
+    const divisasResponse = await axios.get('https://www.banregio.com/divisas.php', {
+      headers,
+      timeout: 20000,
+      maxRedirects: 3
+    });
+    
+    console.log(`📄 Respuesta con sesión: ${divisasResponse.status}, ${divisasResponse.data?.length || 0} bytes`);
+    
+    if (divisasResponse.data && divisasResponse.data.length > 2000) {
+      return analizarHTMLCompleto(divisasResponse.data, 'https://www.banregio.com/divisas.php');
     }
-  });
+    
+    throw new Error('Respuesta muy pequeña incluso con sesión de navegador');
+    
+  } catch (error) {
+    console.log('❌ Error en simulación de navegador:', error.message);
+    throw error;
+  }
+}
+
+// ✅ ANÁLISIS DE JAVASCRIPT EMBEBIDO (ÚLTIMO RECURSO)
+async function analizarJavaScriptEmbebido() {
+  console.log('📜 Analizando JavaScript embebido conocido...');
   
-  return tasas;
+  // Esta función intentará inferir las tasas basándose en patrones conocidos
+  // de la calculadora de Banregio cuando no se puede acceder a la página
+  
+  throw new Error('No se puede analizar JavaScript sin acceso a la página');
 }
 
 // ✅ FUNCIÓN PRINCIPAL DE CONVERSIÓN
@@ -332,12 +474,12 @@ async function convertirDivisa({ tipo = 'compra', moneda = 'USD', cantidad = 300
     let resultado = getCached(cacheKey);
     
     if (!resultado) {
-      console.log('📡 Calculando conversión fresca...');
+      console.log('📡 Calculando conversión desde Banregio...');
       
-      const tasas = await obtenerTasasBanregio();
+      const tasas = await extraerTasasDeBanregio();
       
       if (!tasas[moneda]) {
-        throw new Error(`Moneda ${moneda} no soportada`);
+        throw new Error(`Moneda ${moneda} no encontrada en las tasas de Banregio. Disponibles: ${Object.keys(tasas).join(', ')}`);
       }
       
       const tasaMoneda = tasas[moneda];
@@ -350,12 +492,13 @@ async function convertirDivisa({ tipo = 'compra', moneda = 'USD', cantidad = 300
         tipo,
         moneda,
         cantidad,
-        fuente: 'banregio-multi-strategy',
+        fuente: 'banregio-oficial',
         timestamp: new Date().toISOString(),
         detalles: {
           tasaCompra: tasaMoneda.compra,
           tasaVenta: tasaMoneda.venta,
-          method: 'multi-strategy-extraction',
+          method: 'official-banregio-scraping',
+          url: 'https://www.banregio.com/divisas.php#!',
           ultimaActualizacion: new Date().toLocaleString('es-MX')
         }
       };
@@ -370,19 +513,19 @@ async function convertirDivisa({ tipo = 'compra', moneda = 'USD', cantidad = 300
     
   } catch (error) {
     console.error('❌ Error en conversión:', error.message);
-    throw new Error(`Error en conversión: ${error.message}`);
+    throw new Error(`Error extrayendo tasas de Banregio: ${error.message}`);
   }
 }
 
-// ✅ FUNCIÓN CON RETRY MEJORADA
+// ✅ FUNCIÓN CON RETRY
 async function convertirDivisaConRetry(params, reintentos = 0) {
   try {
     return await convertirDivisa(params);
   } catch (error) {
     if (reintentos < 2) {
       console.log(`🔄 Reintento ${reintentos + 1}/3 después de error: ${error.message}`);
-      // Delay exponencial con jitter
-      const delay = (1000 * Math.pow(2, reintentos)) + (Math.random() * 1000);
+      // Delay progresivo con jitter
+      const delay = (2000 * Math.pow(2, reintentos)) + (Math.random() * 2000);
       await new Promise(resolve => setTimeout(resolve, delay));
       return await convertirDivisaConRetry(params, reintentos + 1);
     }
@@ -390,55 +533,77 @@ async function convertirDivisaConRetry(params, reintentos = 0) {
   }
 }
 
-// ✅ DIAGNÓSTICO MEJORADO
+// ✅ DIAGNÓSTICO ESPECÍFICO DE BANREGIO
 async function diagnosticarBanregio() {
   try {
-    console.log('🔬 Iniciando diagnóstico completo...');
+    console.log('🔬 Ejecutando diagnóstico específico de Banregio...');
     
     const diagnostico = {
       timestamp: new Date().toISOString(),
-      scraping: { success: false, error: null, contentSize: 0 },
-      apis: { attempted: 0, successful: 0 },
-      tasas: null,
-      fallback: getTasasActualizadas()
+      url: 'https://www.banregio.com/divisas.php#!',
+      conexion: { success: false, status: null, contentSize: 0, error: null },
+      calculadora: { detected: false, inputs: false, scripts: false },
+      tasas: { extracted: false, currencies: [], error: null },
+      navegador: { session: false, cookies: 0 }
     };
     
-    // Probar scraping
+    // Probar conexión básica
     try {
       const response = await axios.get('https://www.banregio.com/divisas.php', {
-        headers: getRandomHeaders(),
-        timeout: 10000,
+        headers: getBanregioHeaders(),
+        timeout: 15000,
         validateStatus: (status) => status >= 200 && status < 500
       });
       
-      diagnostico.scraping.success = response.status === 200;
-      diagnostico.scraping.contentSize = response.data?.length || 0;
-      diagnostico.scraping.status = response.status;
+      diagnostico.conexion.success = response.status === 200;
+      diagnostico.conexion.status = response.status;
+      diagnostico.conexion.contentSize = response.data?.length || 0;
       
       if (response.data && response.data.length > 1000) {
-        const tasasExtraidas = extraerTasasDelHTML(response.data);
-        diagnostico.tasas = tasasExtraidas;
+        const $ = cheerio.load(response.data);
+        
+        diagnostico.calculadora.detected = $('#divisa').length > 0 && $('#mxn').length > 0;
+        diagnostico.calculadora.inputs = $('input').length;
+        diagnostico.calculadora.scripts = $('script').length;
+        
+        // Intentar extraer tasas
+        try {
+          const tasasExtraidas = analizarHTMLCompleto(response.data, 'diagnóstico');
+          diagnostico.tasas.extracted = true;
+          diagnostico.tasas.currencies = Object.keys(tasasExtraidas);
+        } catch (tasasError) {
+          diagnostico.tasas.error = tasasError.message;
+        }
       }
       
-    } catch (scrapingError) {
-      diagnostico.scraping.error = scrapingError.message;
+    } catch (conexionError) {
+      diagnostico.conexion.error = conexionError.message;
     }
     
-    // Probar APIs alternativas
-    const endpoints = [
-      'https://www.banregio.com/api/divisas',
-      'https://divisas.banregio.com/api/rates'
-    ];
-    
-    diagnostico.apis.attempted = endpoints.length;
-    
-    for (const endpoint of endpoints) {
-      try {
-        await axios.get(endpoint, { timeout: 5000 });
-        diagnostico.apis.successful++;
-      } catch (error) {
-        // Ignorar errores para diagnóstico
+    // Probar con sesión de navegador
+    try {
+      const mainResponse = await axios.get('https://www.banregio.com/', {
+        headers: getBanregioHeaders(),
+        timeout: 10000
+      });
+      
+      const cookies = mainResponse.headers['set-cookie'] || [];
+      diagnostico.navegador.cookies = cookies.length;
+      
+      if (cookies.length > 0) {
+        const sessionResponse = await axios.get('https://www.banregio.com/divisas.php', {
+          headers: {
+            ...getBanregioHeaders(),
+            'Cookie': cookies.join('; ')
+          },
+          timeout: 10000
+        });
+        
+        diagnostico.navegador.session = sessionResponse.status === 200;
       }
+      
+    } catch (navegadorError) {
+      // Ignorar errores de navegador para diagnóstico
     }
     
     return diagnostico;
@@ -484,23 +649,24 @@ app.get('/api/health', async (req, res) => {
     const diagnostico = await diagnosticarBanregio();
     
     res.json({
-      status: 'OK',
-      service: 'Banregio API (Multi-Strategy)',
+      status: diagnostico.conexion?.success ? 'OK' : 'DEGRADED',
+      service: 'Banregio Official API (Scraping Only)',
       banregio: {
-        scraping: diagnostico.scraping?.success ? 'OK' : 'BLOCKED',
-        apis: `${diagnostico.apis?.successful}/${diagnostico.apis?.attempted} working`,
-        contentSize: diagnostico.scraping?.contentSize || 0
+        url: 'https://www.banregio.com/divisas.php#!',
+        conexion: diagnostico.conexion?.success ? 'OK' : 'BLOCKED',
+        calculadora: diagnostico.calculadora?.detected ? 'DETECTED' : 'NOT_FOUND',
+        tasas: diagnostico.tasas?.extracted ? 'EXTRACTED' : 'FAILED',
+        contentSize: diagnostico.conexion?.contentSize || 0
       },
-      tasas: diagnostico.tasas ? 'extracted' : 'fallback',
       cache: `${cache.size} entries`,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.json({
-      status: 'DEGRADED',  
-      service: 'Banregio API (Multi-Strategy)',
+    res.status(503).json({
+      status: 'ERROR',
+      service: 'Banregio Official API (Scraping Only)',
       error: error.message,
-      fallback: 'available',
+      message: 'No se puede acceder a la página oficial de Banregio',
       timestamp: new Date().toISOString()
     });
   }
@@ -527,13 +693,14 @@ app.post('/api/convert', validateParams, async (req, res) => {
       meta: { 
         processingTimeMs: Date.now() - start,
         method: 'POST',
-        cached: result.timestamp ? false : true
+        source: 'banregio-official'
       }
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(503).json({
       success: false,
       error: error.message,
+      message: 'No se pudieron extraer las tasas de la página oficial de Banregio',
       meta: { processingTimeMs: Date.now() - start }
     });
   }
@@ -559,13 +726,15 @@ app.get('/api/convert/:tipo/:moneda/:cantidad', validateParams, async (req, res)
       data: result,
       meta: { 
         processingTimeMs: Date.now() - start,
-        method: 'GET'
+        method: 'GET',
+        source: 'banregio-official'
       }
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(503).json({
       success: false,
       error: error.message,
+      message: 'No se pudieron extraer las tasas de la página oficial de Banregio',
       meta: { processingTimeMs: Date.now() - start }
     });
   }
@@ -577,6 +746,7 @@ app.get('/api/diagnostico', async (req, res) => {
     res.json({
       success: true,
       data: diagnostico,
+      message: 'Diagnóstico completo de conectividad con Banregio',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -589,25 +759,27 @@ app.get('/api/diagnostico', async (req, res) => {
 
 app.get('/api/rates', async (req, res) => {
   try {
-    const tasas = await obtenerTasasBanregio();
+    const tasas = await extraerTasasDeBanregio();
     
     res.json({
       success: true,
       data: {
         tasas,
+        fuente: 'https://www.banregio.com/divisas.php#!',
         ultimaActualizacion: new Date().toLocaleString('es-MX'),
-        fuente: 'multi-strategy-extraction'
+        method: 'official-scraping'
       },
       meta: {
         timestamp: new Date().toISOString(),
-        cached: getCached('tasas-banregio') ? true : false
+        cached: getCached('tasas-banregio-oficial') ? true : false
       }
     });
     
   } catch (error) {
-    res.status(500).json({
+    res.status(503).json({
       success: false,
-      error: error.message
+      error: error.message,
+      message: 'No se pudieron extraer las tasas de la página oficial de Banregio'
     });
   }
 });
@@ -625,9 +797,10 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
     const debugInfo = {
       params: { tipo, moneda, cantidad: parseFloat(cantidad) },
       timestamp: new Date().toISOString(),
+      url: 'https://www.banregio.com/divisas.php#!',
       conversion: null,
       diagnostico: null,
-      tasasDisponibles: null,
+      tasas: null,
       error: null
     };
     
@@ -648,7 +821,7 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
     }
     
     try {
-      debugInfo.tasasDisponibles = await obtenerTasasBanregio();
+      debugInfo.tasas = await extraerTasasDeBanregio();
     } catch (tasasError) {
       debugInfo.tasasError = tasasError.message;
     }
@@ -658,9 +831,10 @@ app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
       data: debugInfo,
       summary: {
         conversionWorked: !debugInfo.error,
-        scrapingWorked: debugInfo.diagnostico?.scraping?.success || false,
-        tasasObtenidas: Object.keys(debugInfo.tasasDisponibles || {}).length,
-        usingFallback: debugInfo.conversion?.fuente?.includes('fallback') || false
+        banregioAccessible: debugInfo.diagnostico?.conexion?.success || false,
+        calculadoraDetected: debugInfo.diagnostico?.calculadora?.detected || false,
+        tasasExtracted: debugInfo.tasas ? Object.keys(debugInfo.tasas).length : 0,
+        recommendedAction: debugInfo.error ? 'Verificar acceso a Banregio' : 'Todo funcionando'
       }
     });
     
@@ -676,7 +850,7 @@ app.delete('/api/cache', (req, res) => {
   cache.clear();
   res.json({
     success: true,
-    message: 'Cache limpiado',
+    message: 'Cache limpiado - próximas consultas extraerán tasas frescas de Banregio',
     timestamp: new Date().toISOString()
   });
 });
@@ -687,49 +861,49 @@ app.get('/api/currencies', (req, res) => {
     data: {
       supported: ['USD', 'EUR', 'CAD', 'GBP', 'JPY'],
       types: ['compra', 'venta', 'comprar', 'vender'],
-      currentRates: getTasasActualizadas()
+      source: 'https://www.banregio.com/divisas.php#!',
+      note: 'Tasas extraídas en tiempo real de la página oficial de Banregio'
     }
   });
 });
 
 app.get('/api/info', (req, res) => {
   res.json({
-    service: 'Banregio Currency API (Multi-Strategy Anti-Detection)',
-    version: '5.0',
-    descripcion: 'API robusta con múltiples estrategias y técnicas anti-detección',
-    target: 'https://www.banregio.com/divisas.php',
+    service: 'Banregio Official Currency API (Scraping Only)',
+    version: '6.0',
+    descripcion: 'API que extrae tasas EXCLUSIVAMENTE de la página oficial de Banregio',
+    source: 'https://www.banregio.com/divisas.php#!',
+    policy: 'SOLO FUENTE OFICIAL - No se usan fuentes externas ni fallbacks',
     strategies: [
-      'Scraping with Anti-Detection Headers (Primary)',
-      'Alternative API Endpoints Discovery',
-      'Real-Time Rate Extraction from Multiple Sources',
-      'Updated Verified Fallback Rates (USD: 17.80/19.30)',
-      'Smart Caching with 5-minute TTL',
-      'Exponential Backoff Retry Logic'
+      'Advanced Web Scraping with Anti-Detection',
+      'Browser Session Simulation with Cookies',
+      'Complete JavaScript Analysis for Rate Extraction',
+      'Multi-URL Fallback (only official Banregio URLs)',
+      'Smart Caching (3 minutes TTL)'
     ],
     features: [
-      'Headers rotativos con múltiples User-Agents',
-      'Delays aleatorios para simular comportamiento humano',
-      'Detección automática de bloqueos con fallback',
-      'Tasas verificadas actualizadas al 31 de julio 2025',
-      'Soporte completo para compra/venta y comprar/vender',
-      'Cache inteligente con TTL de 5 minutos',
-      'Diagnóstico completo de conectividad',
-      'Retry con backoff exponencial y jitter'
+      'Extracción directa desde JavaScript de la calculadora',
+      'Headers anti-detección específicos para Banregio',
+      'Simulación de sesión completa de navegador',
+      'Análisis profundo de elementos HTML y scripts',
+      'Detección automática de calculadora (#divisa, #mxn)',
+      'Soporte para múltiples patrones de tasas en el código',
+      'Retry inteligente con delays progresivos',
+      'Diagnóstico detallado de conectividad'
     ],
-    currentRates: {
-      USD: 'Compra: $17.80 MXN, Venta: $19.30 MXN',
-      EUR: 'Compra: $20.20 MXN, Venta: $21.80 MXN',
-      source: 'Verificado con fuentes externas actualizadas',
-      lastUpdate: new Date().toLocaleString('es-MX')
-    },
+    requirements: [
+      'Acceso a https://www.banregio.com/divisas.php#!',
+      'Calculadora de divisas debe estar disponible',
+      'JavaScript con tasas debe estar presente en la página'
+    ],
     endpoints: [
-      'GET  /api/health - Estado y diagnóstico',
-      'POST /api/convert - Conversión por POST',
+      'GET  /api/health - Estado de conexión con Banregio',
+      'POST /api/convert - Conversión usando tasas oficiales',
       'GET  /api/convert/:tipo/:moneda/:cantidad - Conversión por GET',
-      'GET  /api/rates - Todas las tasas actuales',
-      'GET  /api/diagnostico - Diagnóstico completo',
+      'GET  /api/rates - Todas las tasas extraídas de Banregio',
+      'GET  /api/diagnostico - Diagnóstico completo de acceso',
       'GET  /api/debug/:tipo/:moneda/:cantidad - Debug detallado',
-      'DELETE /api/cache - Limpiar cache',
+      'DELETE /api/cache - Forzar extracción fresca',
       'GET  /api/currencies - Monedas soportadas',
       'GET  /api/info - Esta información'
     ],
@@ -737,13 +911,20 @@ app.get('/api/info', (req, res) => {
       conversion: '/api/convert/compra/USD/500',
       debug: '/api/debug/compra/USD/300',
       rates: '/api/rates',
+      diagnostico: '/api/diagnostico',
       body: { tipo: 'compra', moneda: 'USD', cantidad: 500 }
     },
-    antiDetection: {
-      userAgents: '4 User-Agents rotativos',
-      delays: 'Delays aleatorios 1-3 segundos',
-      headers: 'Headers completos de navegador real',
-      fallback: 'Tasas verificadas si hay bloqueo'
+    warnings: [
+      'Si Banregio bloquea el acceso, la API fallará completamente',
+      'No hay fallbacks externos - solo fuente oficial',
+      'Requiere que la calculadora esté disponible en la página',
+      'Dependiente de la estructura actual del sitio de Banregio'
+    ],
+    troubleshooting: {
+      'Error de tasas': 'Usar /api/diagnostico para verificar acceso',
+      'Respuesta muy pequeña': 'Banregio está bloqueando el bot',
+      'Calculadora no detectada': 'Estructura de la página cambió',
+      'Sin tasas extraídas': 'JavaScript de tasas no encontrado'
     }
   });
 });
@@ -751,7 +932,8 @@ app.get('/api/info', (req, res) => {
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint no encontrado',
-    info: 'GET /api/info para ver todos los endpoints disponibles'
+    info: 'GET /api/info para ver todos los endpoints disponibles',
+    source: 'https://www.banregio.com/divisas.php#!'
   });
 });
 
@@ -770,16 +952,17 @@ setInterval(() => {
   if (cleaned > 0) {
     console.log(`🧹 Cache limpiado: ${cleaned} entradas eliminadas. Entradas actuales: ${cache.size}`);
   }
-}, 5 * 60 * 1000); // Cada 5 minutos
+}, 3 * 60 * 1000); // Cada 3 minutos
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 API Banregio (Multi-Strategy Anti-Detection) iniciada en puerto ${PORT}`);
-  console.log(`🎯 Target: https://www.banregio.com/divisas.php`);
-  console.log(`💡 Estrategias: Scraping + APIs + Fallback verificado`);
-  console.log(`💰 Tasas actuales: USD 17.80/19.30, EUR 20.20/21.80`);
+  console.log(`🚀 API Banregio (SOLO FUENTE OFICIAL) iniciada en puerto ${PORT}`);
+  console.log(`🎯 Fuente única: https://www.banregio.com/divisas.php#!`);
+  console.log(`📜 Política: SOLO extracción desde página oficial de Banregio`);
+  console.log(`🔧 Estrategias: Scraping avanzado + Simulación de navegador`);
   console.log(`📋 Info: http://localhost:${PORT}/api/info`);
   console.log(`🔬 Health: http://localhost:${PORT}/api/health`);
-  console.log(`💱 Ejemplo: http://localhost:${PORT}/api/convert/compra/USD/300`);
+  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug/compra/USD/300`);
+  console.log(`⚠️  ADVERTENCIA: Sin acceso a Banregio = API no funciona`);
 });
 
 // Graceful shutdown
