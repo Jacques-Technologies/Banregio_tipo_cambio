@@ -56,9 +56,12 @@ async function simularConvertToMXNConBrowser(moneda = 'USD', cantidad = 100, tip
     await page.select('.custom-select', moneda);
     
     console.log(`💰 Ingresando cantidad: ${cantidad}...`);
-    await page.click('#divisa');
-    await page.keyboard.selectAll();
-    await page.keyboard.type(String(cantidad), { delay: 50 });
+    await page.focus('#divisa');
+    await page.keyboard.down('Control');
+    await page.keyboard.press('A');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Backspace');
+    await page.type('#divisa', String(cantidad), { delay: 50 });
     
     console.log(`🔘 Seleccionando operación: ${tipoOperacion}...`);
     const botonTexto = tipoOperacion === 'compra' ? 'Quiero comprar' : 'Quiero vender';
