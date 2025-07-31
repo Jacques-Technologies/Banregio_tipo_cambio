@@ -48,63 +48,168 @@ function setCache(key, data) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// ✅ FUNCIÓN PARA OBTENER APIS INTERNAS DE LA CALCULADORA
-async function obtenerAPIsCalculadora() {
+// ✅ FUNCIÓN PARA ANÁLISIS DETALLADO DEL HTML (DEBUG)
+async function analizarHTMLDetallado() {
   try {
-    console.log('🔍 Analizando APIs de la calculadora...');
+    console.log('🔍 Iniciando análisis detallado del HTML...');
     
     const response = await axios.get('https://www.banregio.com/divisas.php', {
       headers: {
         ...headers,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-      },
-      timeout: 15000
-    });
-    
-    const html = response.data;
-    const $ = cheerio.load(html);
-    
-    // Buscar scripts que contengan URLs de API o endpoints
-    const apis = {
-      endpoints: [],
-      methods: [],
-      params: []
-    };
-    
-    $('script').each((i, script) => {
-      const content = $(script).html();
-      if (content) {
-        // Buscar URLs de API
-        const urlMatches = content.match(/['"](\/api\/[^'"]*|\/ajax\/[^'"]*|\/ws\/[^'"]*)['"]/gi);
-        if (urlMatches) {
-          urlMatches.forEach(url => {
-            const cleanUrl = url.replace(/['"]/g, '');
-            if (!apis.endpoints.includes(cleanUrl)) {
-              apis.endpoints.push(cleanUrl);
-            }
-          });
-        }
-        
-        // Buscar métodos AJAX
-        const ajaxMatches = content.match(/\$\.ajax\s*\(\s*\{([^}]+)\}/gi);
-        if (ajaxMatches) {
-          ajaxMatches.forEach(match => apis.methods.push(match));
-        }
-        
-        // Buscar parámetros de divisas
-        const paramMatches = content.match(/(divisa|moneda|cantidad|tipo|mxn)[^=]*=([^;,\n]+)/gi);
-        if (paramMatches) {
-          paramMatches.forEach(param => apis.params.push(param));
-        }
       }
     });
     
-    console.log('🔍 APIs encontradas:', apis);
-    return apis;
+    const $ = cheerio.load(response.data);
+    const analysis = {
+      pageInfo: {
+        title: $('title').text().trim(),
+        htmlSize: response.data.length,
+        timestamp: new Date().toISOString()
+      },
+      elements: {
+        scripts: [],
+        inputs: [],
+        selects: [],
+        forms: [],
+        tables: [],
+        divs: []
+      },
+      content: {
+        allNumbers: [],
+        currencyMentions: {},
+        potentialRates: []
+      }
+    };
+    
+    // Analizar scripts
+    $('script').each((i, script) => {
+      const content = $(script).html();
+      const src = $(script).attr('src');
+      
+      if (content) {
+        const hasNumbers = /\d{1,2}\.\d{2,4}/.test(content);
+        const hasCurrency = /(USD|EUR|CAD|GBP|JPY|divisa|currency)/i.test(content);
+        const hasAjax = /(ajax|xhr|fetch|post|get)/i.test(content);
+        
+        analysis.elements.scripts.push({
+          index: i,
+          size: content.length,
+          hasNumbers,
+          hasCurrency,
+          hasAjax,
+          preview: content.substring(0, 200).replace(/\s+/g, ' ')
+        });
+      } else if (src) {
+        analysis.elements.scripts.push({
+          index: i,
+          external: true,
+          src
+        });
+      }
+    });
+    
+    // Analizar inputs
+    $('input').each((i, input) => {
+      const $input = $(input);
+      analysis.elements.inputs.push({
+        index: i,
+        id: $input.attr('id'),
+        name: $input.attr('name'),
+        type: $input.attr('type'),
+        class: $input.attr('class'),
+        value: $input.attr('value') || $input.val(),
+        placeholder: $input.attr('placeholder')
+      });
+    });
+    
+    // Analizar selects
+    $('select').each((i, select) => {
+      const $select = $(select);
+      const options = $select.find('option').map((j, opt) => ({
+        value: $(opt).attr('value'),
+        text: $(opt).text().trim()
+      })).get();
+      
+      analysis.elements.selects.push({
+        index: i,
+        id: $select.attr('id'),
+        name: $select.attr('name'),
+        class: $select.attr('class'),
+        options
+      });
+    });
+    
+    // Analizar formularios
+    $('form').each((i, form) => {
+      const $form = $(form);
+      analysis.elements.forms.push({
+        index: i,
+        action: $form.attr('action'),
+        method: $form.attr('method'),
+        id: $form.attr('id'),
+        class: $form.attr('class')
+      });
+    });
+    
+    // Analizar tablas
+    $('table').each((i, table) => {
+      const $table = $(table);
+      const rows = $table.find('tr').length;
+      const cells = $table.find('td, th').length;
+      const text = $table.text().replace(/\s+/g, ' ').trim();
+      
+      analysis.elements.tables.push({
+        index: i,
+        rows,
+        cells,
+        class: $table.attr('class'),
+        preview: text.substring(0, 200),
+        hasCurrency: /(USD|EUR|CAD|GBP|JPY)/i.test(text),
+        hasNumbers: /\d{1,2}\.\d{2,4}/.test(text)
+      });
+    });
+    
+    // Analizar divs importantes
+    $('div[class*="divisa"], div[class*="currency"], div[class*="exchange"], div[id*="calc"]').each((i, div) => {
+      const $div = $(div);
+      const text = $div.text().replace(/\s+/g, ' ').trim();
+      
+      analysis.elements.divs.push({
+        index: i,
+        id: $div.attr('id'),
+        class: $div.attr('class'),
+        preview: text.substring(0, 200),
+        hasNumbers: /\d{1,2}\.\d{2,4}/.test(text)
+      });
+    });
+    
+    // Analizar contenido numérico
+    const allText = response.data.replace(/<[^>]+>/g, ' ');
+    const numbers = allText.match(/\b\d{1,2}\.\d{2,4}\b/g) || [];
+    analysis.content.allNumbers = [...new Set(numbers)].map(n => parseFloat(n)).sort((a, b) => a - b);
+    
+    // Buscar menciones de monedas
+    const currencies = ['USD', 'EUR', 'CAD', 'GBP', 'JPY'];
+    currencies.forEach(currency => {
+      const mentions = (allText.match(new RegExp(currency, 'gi')) || []).length;
+      analysis.content.currencyMentions[currency] = mentions;
+    });
+    
+    // Identificar posibles tasas
+    analysis.content.potentialRates = analysis.content.allNumbers.filter(n => 
+      (n >= 15 && n <= 25) || // USD range
+      (n >= 18 && n <= 30) || // EUR range
+      (n >= 12 && n <= 16) || // CAD range
+      (n >= 20 && n <= 28) || // GBP range
+      (n >= 0.1 && n <= 0.2)  // JPY range
+    );
+    
+    return analysis;
     
   } catch (error) {
-    console.error('❌ Error obteniendo APIs:', error.message);
-    return { endpoints: [], methods: [], params: [] };
+    console.error('❌ Error en análisis detallado:', error.message);
+    throw error;
   }
 }
 
@@ -113,7 +218,7 @@ async function simularCalculadoraAjax({ tipo = 'comprar', moneda = 'USD', cantid
   try {
     console.log(`🎯 Simulando calculadora AJAX: ${tipo} ${cantidad} ${moneda}`);
     
-    // Primero obtener la página para extraer tokens/sesiones
+    // Primero obtener la página para extraer tokens/sesiones y cookies
     const pageResponse = await axios.get('https://www.banregio.com/divisas.php', {
       headers: {
         ...headers,
@@ -122,91 +227,186 @@ async function simularCalculadoraAjax({ tipo = 'comprar', moneda = 'USD', cantid
     });
     
     const $ = cheerio.load(pageResponse.data);
+    const cookies = pageResponse.headers['set-cookie'];
+    
+    console.log('🍪 Cookies obtenidas:', cookies ? cookies.length : 0);
     
     // Extraer posibles tokens CSRF o parámetros de sesión
     let csrfToken = null;
-    let sessionId = null;
     
-    $('input[name*="token"], input[name*="csrf"], meta[name*="token"]').each((i, el) => {
-      const name = $(el).attr('name') || $(el).attr('property');
+    $('input[name*="token"], input[name*="csrf"], meta[name*="token"], meta[name*="_token"]').each((i, el) => {
+      const name = $(el).attr('name') || $(el).attr('property') || $(el).attr('content');
       const value = $(el).attr('value') || $(el).attr('content');
-      if (name && value) {
+      if (name && value && value.length > 10) {
         csrfToken = value;
+        console.log('🔑 Token encontrado:', name, '=', value.substring(0, 20) + '...');
       }
     });
     
-    // Intentar diferentes endpoints posibles para la calculadora
-    const possibleEndpoints = [
-      '/api/divisas/convert',
-      '/ajax/divisas.php',
-      '/ws/divisas',
-      '/divisas/calculate',
-      '/api/currency/convert',
-      'divisas.php' // Mismo archivo con POST
-    ];
+    // Buscar formularios y sus parámetros
+    const formParams = {};
+    $('form input, form select').each((i, el) => {
+      const name = $(el).attr('name');
+      const value = $(el).attr('value') || $(el).val();
+      if (name && value) {
+        formParams[name] = value;
+      }
+    });
     
-    for (const endpoint of possibleEndpoints) {
-      try {
-        console.log(`🔄 Probando endpoint: ${endpoint}`);
-        
-        const url = endpoint.startsWith('/') ? 
-          `https://www.banregio.com${endpoint}` : 
-          `https://www.banregio.com/${endpoint}`;
-        
-        // Preparar datos de la petición
-        const postData = {
-          tipo: tipo,
-          moneda: moneda,
-          cantidad: cantidad,
+    console.log('📝 Parámetros del formulario encontrados:', Object.keys(formParams));
+    
+    // Intentar diferentes variaciones de petición al mismo divisas.php
+    const requestVariations = [
+      {
+        method: 'POST',
+        endpoint: 'divisas.php',
+        data: {
+          tipo,
+          moneda,
+          cantidad,
+          action: 'convert',
+          ajax: '1',
+          ...formParams,
+          ...(csrfToken && { _token: csrfToken })
+        },
+        contentType: 'application/x-www-form-urlencoded'
+      },
+      {
+        method: 'POST',
+        endpoint: 'divisas.php',
+        data: {
           divisa: cantidad,
           currency: moneda,
-          action: 'calculate',
-          ...(csrfToken && { _token: csrfToken, csrf_token: csrfToken })
+          operation: tipo,
+          calculate: 'true',
+          ...formParams
+        },
+        contentType: 'application/x-www-form-urlencoded'
+      },
+      {
+        method: 'GET',
+        endpoint: 'divisas.php',
+        data: {
+          tipo,
+          moneda,
+          cantidad,
+          ajax: '1'
+        },
+        contentType: null
+      },
+      {
+        method: 'POST',
+        endpoint: 'divisas.php',
+        data: JSON.stringify({
+          tipo,
+          moneda,
+          cantidad
+        }),
+        contentType: 'application/json'
+      }
+    ];
+    
+    for (const variation of requestVariations) {
+      try {
+        console.log(`🔄 Probando variación: ${variation.method} ${variation.endpoint}`);
+        console.log('📤 Datos:', variation.data);
+        
+        const url = `https://www.banregio.com/${variation.endpoint}`;
+        
+        const requestHeaders = {
+          ...headers,
+          ...(cookies && { 'Cookie': cookies.join('; ') }),
+          ...(variation.contentType && { 'Content-Type': variation.contentType })
         };
         
-        const formData = new URLSearchParams(postData).toString();
+        let response;
         
-        // Hacer petición POST
-        const response = await axios.post(url, formData, {
-          headers: {
-            ...headers,
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-          },
-          timeout: 10000,
-          validateStatus: (status) => status < 500
-        });
+        if (variation.method === 'GET') {
+          const params = new URLSearchParams(variation.data).toString();
+          response = await axios.get(`${url}?${params}`, {
+            headers: requestHeaders,
+            timeout: 10000,
+            validateStatus: (status) => status < 500
+          });
+        } else {
+          const requestData = variation.contentType === 'application/json' 
+            ? variation.data 
+            : new URLSearchParams(variation.data).toString();
+            
+          response = await axios.post(url, requestData, {
+            headers: requestHeaders,
+            timeout: 10000,
+            validateStatus: (status) => status < 500
+          });
+        }
         
-        console.log(`📡 Respuesta ${endpoint}:`, response.status, typeof response.data);
+        console.log(`📡 Respuesta ${variation.method} ${variation.endpoint}:`, response.status, typeof response.data, response.data.length || 0);
         
-        // Verificar si la respuesta contiene datos útiles
+        // Verificar si la respuesta contiene datos JSON útiles
         if (response.data && typeof response.data === 'object') {
-          if (response.data.mxn || response.data.resultado || response.data.total) {
-            console.log('✅ Endpoint funcional encontrado:', endpoint);
+          if (response.data.mxn || response.data.resultado || response.data.total || response.data.value) {
+            console.log('✅ Respuesta JSON funcional encontrada:', response.data);
             return {
-              endpoint,
+              endpoint: variation.endpoint,
+              method: variation.method,
               data: response.data,
               success: true
             };
           }
         }
         
-        // Si es HTML, buscar el valor MXN en la respuesta
-        if (typeof response.data === 'string' && response.data.includes('mxn')) {
+        // Si es HTML, analizar más profundamente
+        if (typeof response.data === 'string') {
           const $response = cheerio.load(response.data);
-          const mxnValue = $response('#mxn').val() || $response('[name="mxn"]').val();
           
-          if (mxnValue && parseFloat(mxnValue) > 0) {
-            console.log('✅ Valor MXN encontrado en HTML:', mxnValue);
-            return {
-              endpoint,
-              data: { mxn: parseFloat(mxnValue), raw: mxnValue },
-              success: true
-            };
+          // Buscar valor MXN actualizado
+          const possibleMxnSelectors = [
+            '#mxn',
+            'input[name="mxn"]',
+            'input[id*="mxn"]',
+            '.mxn-value',
+            '[data-mxn]',
+            'input[type="text"][value*="."]'
+          ];
+          
+          for (const selector of possibleMxnSelectors) {
+            const element = $response(selector);
+            const value = element.val() || element.text() || element.attr('value');
+            
+            if (value && /^\d+\.?\d*$/.test(value.replace(/[,$]/g, ''))) {
+              const numValue = parseFloat(value.replace(/[,$]/g, ''));
+              if (numValue > cantidad * 10 && numValue < cantidad * 30) { // Rango razonable
+                console.log(`✅ Valor MXN encontrado con ${selector}:`, value);
+                return {
+                  endpoint: variation.endpoint,
+                  method: variation.method,
+                  data: { mxn: numValue, raw: value, selector },
+                  success: true
+                };
+              }
+            }
+          }
+          
+          // Buscar cualquier número que se vea como resultado de conversión
+          const numbers = response.data.match(/\d{3,6}\.\d{2}/g);
+          if (numbers) {
+            const potentialResults = numbers.map(n => parseFloat(n))
+              .filter(n => n > cantidad * 10 && n < cantidad * 30);
+            
+            if (potentialResults.length > 0) {
+              console.log('✅ Posible resultado de conversión encontrado:', potentialResults[0]);
+              return {
+                endpoint: variation.endpoint,
+                method: variation.method,
+                data: { mxn: potentialResults[0], raw: potentialResults[0].toString(), source: 'regex' },
+                success: true
+              };
+            }
           }
         }
         
-      } catch (endpointError) {
-        console.log(`❌ Error en ${endpoint}:`, endpointError.message);
+      } catch (variationError) {
+        console.log(`❌ Error en variación ${variation.method} ${variation.endpoint}:`, variationError.message);
         continue;
       }
     }
@@ -233,81 +433,175 @@ async function calcularConLogicaReversa({ tipo = 'comprar', moneda = 'USD', cant
     });
     
     const $ = cheerio.load(response.data);
+    const html = response.data;
+    
+    console.log('📄 Tamaño HTML recibido:', html.length, 'chars');
+    console.log('🔍 Buscando elementos clave...');
+    
+    // Debug: Ver estructura de la página
+    console.log('🏗️ Títulos encontrados:', $('h1, h2, h3').map((i, el) => $(el).text().trim()).get());
+    console.log('📋 Tablas encontradas:', $('table').length);
+    console.log('💱 Elementos con "divisa":', $('*').filter((i, el) => $(el).text().toLowerCase().includes('divisa')).length);
     
     // Extraer las tasas desde la página
     const tasas = {};
+    const debugInfo = {
+      strategiesUsed: [],
+      patternsFound: [],
+      elementsAnalyzed: 0
+    };
     
-    // Estrategia 1: Buscar en scripts con datos JSON
+    // Estrategia 1: Análisis profundo de scripts
+    debugInfo.strategiesUsed.push('script-analysis');
     $('script').each((i, script) => {
       const content = $(script).html();
-      if (content && (content.includes('USD') || content.includes('divisas'))) {
-        // Buscar objetos que parezcan tasas de cambio
-        const ratePatterns = [
-          /(\w{3})\s*[:=]\s*\{\s*['"]*compra['"]*\s*[:=]\s*([\d.]+)[^}]*['"]*venta['"]*\s*[:=]\s*([\d.]+)/gi,
-          /['"]*(\w{3})['"]*\s*[:=]\s*\[([\d.]+),\s*([\d.]+)\]/gi,
-          /(\w{3}).*?([\d.]{4,6}).*?([\d.]{4,6})/gi
+      if (content) {
+        debugInfo.elementsAnalyzed++;
+        
+        // Buscar variables con nombres relacionados a divisas
+        const variablePatterns = [
+          /(?:var|let|const)\s+(\w*(?:rate|divisa|currency|exchange)\w*)\s*=\s*([^;]+);/gi,
+          /(\w+)\s*[:=]\s*\{[^}]*(?:compra|venta|buy|sell)[^}]*\}/gi,
+          /(?:USD|EUR|CAD|GBP|JPY).*?(\d{1,2}\.\d{2,4})/gi
         ];
         
-        ratePatterns.forEach(pattern => {
+        variablePatterns.forEach((pattern, idx) => {
           let match;
           while ((match = pattern.exec(content)) !== null) {
-            const [, currency, rate1, rate2] = match;
-            if (currency && rate1 && rate2) {
-              const num1 = parseFloat(rate1);
-              const num2 = parseFloat(rate2);
-              if (num1 > 0 && num2 > 0 && num1 !== num2) {
-                tasas[currency.toUpperCase()] = {
-                  compra: Math.min(num1, num2),
-                  venta: Math.max(num1, num2)
-                };
-              }
-            }
+            debugInfo.patternsFound.push(`script-pattern-${idx}: ${match[0].substring(0, 100)}`);
           }
         });
-      }
-    });
-    
-    // Estrategia 2: Buscar en elementos HTML visibles
-    $('.currency-rate, .exchange-rate, .divisa-rate').each((i, el) => {
-      const text = $(el).text();
-      const currencyMatch = text.match(/(USD|EUR|CAD|GBP|JPY)/i);
-      const rateMatches = text.match(/([\d.]+)/g);
-      
-      if (currencyMatch && rateMatches && rateMatches.length >= 2) {
-        const currency = currencyMatch[0].toUpperCase();
-        const rates = rateMatches.map(r => parseFloat(r)).filter(r => r > 0.01);
         
-        if (rates.length >= 2) {
-          tasas[currency] = {
-            compra: Math.min(...rates),
-            venta: Math.max(...rates)
-          };
+        // Buscar números que parezcan tasas de cambio (15-25 para USD, 18-30 para EUR)
+        const usdRates = content.match(/\b(1[6-9]|2[0-4])\.\d{2,4}\b/g);
+        const eurRates = content.match(/\b(1[8-9]|2[0-9]|3[0-2])\.\d{2,4}\b/g);
+        
+        if (usdRates && usdRates.length >= 2) {
+          const rates = usdRates.map(r => parseFloat(r)).sort((a, b) => a - b);
+          tasas.USD = { compra: rates[0], venta: rates[rates.length - 1] };
+          debugInfo.patternsFound.push(`USD rates in script: ${usdRates.join(', ')}`);
+        }
+        
+        if (eurRates && eurRates.length >= 2) {
+          const rates = eurRates.map(r => parseFloat(r)).sort((a, b) => a - b);
+          tasas.EUR = { compra: rates[0], venta: rates[rates.length - 1] };
+          debugInfo.patternsFound.push(`EUR rates in script: ${eurRates.join(', ')}`);
         }
       }
     });
     
-    // Estrategia 3: Buscar patrones en todo el texto
-    const fullText = $.text();
-    const currencies = ['USD', 'EUR', 'CAD', 'GBP', 'JPY'];
-    
-    currencies.forEach(currency => {
-      const regex = new RegExp(`${currency}[^\\d]*(\\d{1,2}\\.\\d{2,4})[^\\d]*(\\d{1,2}\\.\\d{2,4})`, 'gi');
-      const match = regex.exec(fullText);
+    // Estrategia 2: Análisis de tablas y elementos estructurados
+    debugInfo.strategiesUsed.push('table-analysis');
+    $('table, .table, [class*="divisa"], [class*="currency"], [class*="exchange"]').each((i, el) => {
+      const $el = $(el);
+      const text = $el.text();
+      debugInfo.elementsAnalyzed++;
       
+      console.log(`📊 Analizando elemento ${i}:`, $el.prop('tagName'), $el.attr('class'), '- Texto:', text.substring(0, 200));
+      
+      // Buscar patrones en el texto del elemento
+      const currencies = ['USD', 'EUR', 'CAD', 'GBP', 'JPY'];
+      currencies.forEach(currency => {
+        const currencyRegex = new RegExp(`${currency}[^\\d]*((\\d{1,2}\\.\\d{2,4})[^\\d]*)+`, 'gi');
+        const match = currencyRegex.exec(text);
+        
+        if (match) {
+          const numbers = text.match(/\d{1,2}\.\d{2,4}/g);
+          if (numbers && numbers.length >= 2) {
+            const rates = numbers.map(n => parseFloat(n)).filter(n => n > 10 && n < 35);
+            if (rates.length >= 2) {
+              rates.sort((a, b) => a - b);
+              tasas[currency] = { compra: rates[0], venta: rates[rates.length - 1] };
+              debugInfo.patternsFound.push(`${currency} in table: ${rates.join(', ')}`);
+            }
+          }
+        }
+      });
+    });
+    
+    // Estrategia 3: Buscar en inputs y elementos del formulario
+    debugInfo.strategiesUsed.push('form-analysis');
+    $('input, select, option').each((i, el) => {
+      const $el = $(el);
+      const value = $el.val();
+      const text = $el.text();
+      
+      if (value && /^\d{1,2}\.\d{2,4}$/.test(value)) {
+        const rate = parseFloat(value);
+        if (rate > 15 && rate < 30) {
+          debugInfo.patternsFound.push(`Form element rate: ${value}`);
+        }
+      }
+    });
+    
+    // Estrategia 4: Regex agresivo en todo el HTML
+    debugInfo.strategiesUsed.push('html-regex');
+    const htmlText = html.replace(/<[^>]+>/g, ' '); // Remover tags HTML
+    
+    // Buscar patrones específicos para cada moneda
+    const currencyPatterns = {
+      USD: {
+        regex: /USD[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+        range: [15, 25]
+      },
+      EUR: {
+        regex: /EUR[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+        range: [18, 32]
+      },
+      CAD: {
+        regex: /CAD[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+        range: [12, 16]
+      },
+      GBP: {
+        regex: /GBP[^\d]*(\d{1,2}\.\d{2,4})[^\d]*(\d{1,2}\.\d{2,4})/gi,
+        range: [20, 28]
+      },
+      JPY: {
+        regex: /JPY[^\d]*(\d+\.\d{3,4})[^\d]*(\d+\.\d{3,4})/gi,
+        range: [0.1, 0.2]
+      }
+    };
+    
+    Object.entries(currencyPatterns).forEach(([currency, pattern]) => {
+      const match = pattern.regex.exec(htmlText);
       if (match) {
         const rate1 = parseFloat(match[1]);
         const rate2 = parseFloat(match[2]);
         
-        if (rate1 > 0 && rate2 > 0 && Math.abs(rate1 - rate2) > 0.1) {
+        if (rate1 >= pattern.range[0] && rate1 <= pattern.range[1] && 
+            rate2 >= pattern.range[0] && rate2 <= pattern.range[1] && 
+            rate1 !== rate2) {
           tasas[currency] = {
             compra: Math.min(rate1, rate2),
             venta: Math.max(rate1, rate2)
           };
+          debugInfo.patternsFound.push(`${currency} HTML regex: ${rate1}, ${rate2}`);
         }
       }
     });
     
+    // Estrategia 5: Buscar números sueltos que parezcan tasas
+    debugInfo.strategiesUsed.push('loose-numbers');
+    const allNumbers = htmlText.match(/\b\d{1,2}\.\d{2,4}\b/g);
+    if (allNumbers) {
+      const potentialUSDRates = allNumbers.map(n => parseFloat(n)).filter(n => n >= 16 && n <= 20);
+      const potentialEURRates = allNumbers.map(n => parseFloat(n)).filter(n => n >= 19 && n <= 25);
+      
+      if (potentialUSDRates.length >= 2 && !tasas.USD) {
+        potentialUSDRates.sort((a, b) => a - b);
+        tasas.USD = { compra: potentialUSDRates[0], venta: potentialUSDRates[potentialUSDRates.length - 1] };
+        debugInfo.patternsFound.push(`USD loose numbers: ${potentialUSDRates.join(', ')}`);
+      }
+      
+      if (potentialEURRates.length >= 2 && !tasas.EUR) {
+        potentialEURRates.sort((a, b) => a - b);
+        tasas.EUR = { compra: potentialEURRates[0], venta: potentialEURRates[potentialEURRates.length - 1] };
+        debugInfo.patternsFound.push(`EUR loose numbers: ${potentialEURRates.join(', ')}`);
+      }
+    }
+    
     console.log('📊 Tasas extraídas:', tasas);
+    console.log('🔍 Debug info:', debugInfo);
     
     // Usar la tasa encontrada o fallback
     let tasaMoneda = tasas[moneda];
@@ -537,15 +831,64 @@ app.get('/api/convert/:tipo/:moneda/:cantidad', validateParams, async (req, res)
   }
 });
 
-// Endpoint para análisis de APIs
+// Endpoint para análisis detallado de la página
 app.get('/api/analyze', async (req, res) => {
   try {
-    const apis = await obtenerAPIsCalculadora();
+    const analysis = await analizarHTMLDetallado();
     res.json({
       success: true,
-      data: apis,
+      data: analysis,
       timestamp: new Date().toISOString()
     });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Endpoint para análisis específico de conversión
+app.get('/api/debug/:tipo/:moneda/:cantidad', async (req, res) => {
+  try {
+    const { tipo, moneda, cantidad } = req.params;
+    console.log(`🐛 Debug mode para: ${tipo} ${cantidad} ${moneda}`);
+    
+    // Ejecutar ambos métodos y recolectar información detallada
+    const debugInfo = {
+      params: { tipo, moneda, cantidad: parseFloat(cantidad) },
+      timestamp: new Date().toISOString(),
+      ajax: null,
+      reverseLogic: null,
+      htmlAnalysis: null
+    };
+    
+    // Probar simulación AJAX
+    try {
+      debugInfo.ajax = await simularCalculadoraAjax({ tipo, moneda, cantidad: parseFloat(cantidad) });
+    } catch (ajaxError) {
+      debugInfo.ajax = { error: ajaxError.message };
+    }
+    
+    // Probar lógica reversa
+    try {
+      debugInfo.reverseLogic = await calcularConLogicaReversa({ tipo, moneda, cantidad: parseFloat(cantidad) });
+    } catch (reverseError) {
+      debugInfo.reverseLogic = { error: reverseError.message };
+    }
+    
+    // Análisis del HTML
+    try {
+      debugInfo.htmlAnalysis = await analizarHTMLDetallado();
+    } catch (htmlError) {
+      debugInfo.htmlAnalysis = { error: htmlError.message };
+    }
+    
+    res.json({
+      success: true,
+      data: debugInfo
+    });
+    
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -599,24 +942,38 @@ app.get('/api/currencies', (req, res) => {
 // Info de la API
 app.get('/api/info', (req, res) => {
   res.json({
-    service: 'Banregio Currency API (Ajax + Reverse Logic)',
-    version: '2.0',
-    descripcion: 'API para conversión de divisas desde Banregio usando simulación AJAX y lógica reversa',
+    service: 'Banregio Currency API (Enhanced Ajax + Reverse Logic)',
+    version: '2.1',
+    descripcion: 'API mejorada para conversión de divisas desde Banregio con debugging avanzado',
     target: 'https://www.banregio.com/divisas.php',
-    methods: ['Ajax Simulation', 'Reverse Logic', 'Fallback Rates'],
+    methods: ['Enhanced Ajax Simulation', 'Advanced Reverse Logic', 'Fallback Rates'],
+    features: [
+      'Múltiples estrategias de extracción',
+      'Análisis profundo del HTML',
+      'Debug detallado',
+      'Cache inteligente',
+      'Simulación AJAX avanzada'
+    ],
     endpoints: [
       'GET  /api/health',
       'POST /api/convert',
       'GET  /api/convert/:tipo/:moneda/:cantidad',
       'GET  /api/rates',
       'GET  /api/analyze',
+      'GET  /api/debug/:tipo/:moneda/:cantidad',
       'DELETE /api/cache',
       'GET  /api/currencies',
       'GET  /api/info'
     ],
     ejemplo: {
-      url: '/api/convert/comprar/USD/500',
+      conversion: '/api/convert/comprar/USD/500',
+      debug: '/api/debug/comprar/USD/300',
+      analyze: '/api/analyze',
       body: { tipo: 'comprar', moneda: 'USD', cantidad: 500 }
+    },
+    debugging: {
+      description: 'Usa /api/debug/tipo/moneda/cantidad para diagnóstico detallado',
+      analyze: 'Usa /api/analyze para análisis completo del HTML'
     }
   });
 });
