@@ -26,14 +26,72 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // ✅ SOLUCIÓN 2: CONFIGURACIÓN PUPPETEER PARA RENDER
+const findChrome = () => {
+  const possiblePaths = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux*/chrome',
+    '/opt/render/.cache/puppeteer/chrome/linux-1280/chrome-linux/chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    puppeteer.executablePath()
+  ];
+
+  const fs = require('fs');
+  const { execSync } = require('child_process');
+  
+  // Buscar Chrome en paths conocidos
+  for (const path of possiblePaths) {
+    if (path) {
+      try {
+        if (fs.existsSync(path)) {
+          console.log(`✅ Chrome encontrado en: ${path}`);
+          return path;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  }
+  
+  // Buscar usando comandos del sistema
+  try {
+    const chromePath = execSync('which google-chrome-stable || which google-chrome || which chromium-browser || which chromium', { encoding: 'utf8' }).trim();
+    if (chromePath) {
+      console.log(`✅ Chrome encontrado usando 'which': ${chromePath}`);
+      return chromePath;
+    }
+  } catch (e) {
+    console.log('❌ No se pudo encontrar Chrome usando which');
+  }
+  
+  // Buscar en el directorio de Puppeteer
+  try {
+    const puppeteerChrome = execSync('find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null | head -1', { encoding: 'utf8' }).trim();
+    if (puppeteerChrome) {
+      console.log(`✅ Chrome encontrado en cache de Puppeteer: ${puppeteerChrome}`);
+      return puppeteerChrome;
+    }
+  } catch (e) {
+    console.log('❌ No se pudo buscar en cache de Puppeteer');
+  }
+  
+  console.log('❌ No se encontró Chrome en ninguna ubicación');
+  return undefined;
+};
+
 const getBrowserConfig = () => {
   const isProduction = process.env.NODE_ENV === 'production';
   
   if (isProduction) {
+    const chromePath = findChrome();
+    console.log('🔍 Chrome path encontrado:', chromePath || 'ninguno');
+    
     // Configuración específica para Render
     return {
       headless: "new",
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      executablePath: chromePath,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
