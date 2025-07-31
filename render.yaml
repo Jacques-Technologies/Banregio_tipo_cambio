@@ -5,8 +5,13 @@ services:
     region: oregon
     plan: starter
     buildCommand: |
+      echo "🔧 Instalando dependencias..."
       npm ci
+      echo "🔧 Instalando Chrome para Puppeteer..."
       npx puppeteer browsers install chrome
+      echo "🔍 Verificando instalación de Chrome..."
+      find /opt/render/.cache/puppeteer -name "chrome" -type f || echo "❌ Chrome no encontrado"
+      ls -la /opt/render/.cache/puppeteer/ || echo "❌ No se puede listar cache"
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -16,7 +21,9 @@ services:
         value: "true"
       - key: PUPPETEER_CACHE_DIR
         value: "/opt/render/.cache/puppeteer"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: "/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux*/chrome"
     disk:
       name: puppeteer-cache
       mountPath: /opt/render/.cache/puppeteer
-      sizeGB: 1
+      sizeGB: 2
